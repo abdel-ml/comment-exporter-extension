@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Instagram Exporter</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header class="hd">
+    <div class="logo" aria-hidden="true">IG</div>
+    <div>
+      <h1>Instagram Exporter</h1>
+      <p class="sub">Comments &amp; posts → CSV / JSON</p>
+    </div>
+  </header>
+
+  <div class="tabs" role="tablist">
+    <button class="tab is-on" data-mode="comments" role="tab">Comments</button>
+    <button class="tab" data-mode="posts" role="tab">Posts</button>
+  </div>
+
+  <main class="body">
+    <label class="fld">
+      <span class="lbl" id="inputLabel">Post or reel URL</span>
+      <input id="target" type="text" autocomplete="off" spellcheck="false"
+             placeholder="https://www.instagram.com/reel/..." />
+      <span class="hint" id="inputHint">Paste a public post/reel URL, or open one in this tab.</span>
+    </label>
+
+    <label class="fld row">
+      <span class="lbl">How many</span>
+      <select id="count">
+        <option value="50">50</option>
+        <option value="100" selected>100 (max, free)</option>
+      </select>
+    </label>
+
+    <button id="run" class="go">Export</button>
+
+    <div id="status" class="status" hidden></div>
+
+    <div id="result" class="result" hidden>
+      <p class="ok"><strong id="rowCount">0</strong> <span id="rowNoun">rows</span> ready</p>
+      <div class="dl">
+        <button id="dlCsv" class="btn">Download CSV</button>
+        <button id="dlJson" class="btn ghost">JSON</button>
+      </div>
+    </div>
+  </main>
+
+  <footer class="ft">
+    <span id="quota"></span>
+    <a href="https://hammadi.dev/rapidapi" target="_blank" rel="noopener">Need more than 100? Get the API →</a>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>
