@@ -18,6 +18,7 @@
   <div class="tabs" role="tablist">
     <button class="tab is-on" data-mode="comments" role="tab">Comments</button>
     <button class="tab" data-mode="posts" role="tab">Posts</button>
+    <button class="tab" data-mode="media" role="tab">Media</button>
   </div>
 
   <main class="body">
@@ -28,7 +29,7 @@
       <span class="hint" id="inputHint">Paste a public post/reel URL, or open one in this tab.</span>
     </label>
 
-    <label class="fld row">
+    <label class="fld row" id="countRow">
       <span class="lbl">How many</span>
       <select id="count">
         <option value="50">50</option>
@@ -46,6 +47,12 @@
         <button id="dlCsv" class="btn">Download CSV</button>
         <button id="dlJson" class="btn ghost">JSON</button>
       </div>
+    </div>
+
+    <div id="mediaResult" class="result" hidden>
+      <p class="ok"><strong id="mediaCount">0</strong> <span id="mediaNoun">files</span> found</p>
+      <div id="mediaList" class="mgrid"></div>
+      <button id="dlAllMedia" class="btn" hidden>Download all</button>
     </div>
   </main>
 

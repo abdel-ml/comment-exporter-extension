@@ -1,33 +1,42 @@
 # Instagram Comment & Post Exporter — Chrome Extension
 
 A one-click Chrome/Edge extension that exports **all comments from any public
-Instagram post or reel**, or **all posts from a public profile**, to **CSV** or
-**JSON**. It's a thin front end over the free tools at
+Instagram post or reel**, **all posts from a public profile**, or **downloads a
+post's photos & videos**. It's a thin front end over the free tools at
 [hammadi.dev](https://hammadi.dev) — the same scraping backend that powers the
 [Instagram Scraper API](https://hammadi.dev/rapidapi).
+
+**Install from the [Chrome Web Store](https://chromewebstore.google.com/detail/instagram-comment-post-ex/ejjfocklfpidcfenanddaedohidmmjba).**
 
 ## Features
 
 - **Auto-detect** — open the popup on an Instagram post, reel or profile and the
   URL is filled in and the right mode selected for you.
-- **Two modes**
+- **Three modes**
   - *Comments* — full comment thread of a post/reel (text, author, likes,
     replies, timestamp), scrolled past the usual 20-comment cutoff.
   - *Posts* — a profile's grid (URL, type, date, likes, comments, views,
     caption, author).
-- **Export** — CSV (Excel-ready, UTF-8 BOM so emoji survive) or JSON.
+  - *Media* — the photos and videos in a post/reel, each with a thumbnail and a
+    download button (plus "Download all" for carousels).
+- **Export** — CSV (Excel-ready, UTF-8 BOM so emoji survive), JSON, or the raw
+  media files.
 - **No Instagram login.** Only public accounts are readable; the account you
   look up is never notified.
 
-## Install (unpacked, for now)
+## Install
 
-1. Download / clone this folder.
+From the **[Chrome Web Store](https://chromewebstore.google.com/detail/instagram-comment-post-ex/ejjfocklfpidcfenanddaedohidmmjba)** — click *Add to Chrome*, pin the icon, open any
+Instagram page and click it.
+
+<details><summary>Or load unpacked (for development)</summary>
+
+1. Clone this folder.
 2. Go to `chrome://extensions` and turn on **Developer mode** (top right).
 3. Click **Load unpacked** and select this folder.
-4. Pin the icon, open any Instagram post or profile, and click it.
+</details>
 
-Works in Chrome, Edge, Brave and any Chromium browser. (Not yet on the Web
-Store — see below.)
+Works in Chrome, Edge, Brave and any Chromium browser.
 
 ## How it works
 
@@ -37,6 +46,7 @@ The popup calls the free public endpoints on `hammadi.dev`:
 |----------|------------------------------------------------------|
 | Comments | `GET /public/v1/run/export-instagram-comments`       |
 | Posts    | `GET /public/v1/run/instagram-posts`                 |
+| Media    | `GET /public/v1/run/instagram-media-downloader`      |
 
 MV3 grants the popup CORS-free access to `hammadi.dev` via `host_permissions`,
 so no proxy or key is needed. The extension asks for only two permissions:

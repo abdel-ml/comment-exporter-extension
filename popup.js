@@ -40,6 +40,16 @@ const MODES = {
       ["author", (r) => r.owner && r.owner.username],
     ],
   },
+  media: {
+    slug: "instagram-media-downloader",
+    param: "post_url",
+    resultKey: "media",
+    noun: "media files",
+    label: "Post or reel URL",
+    placeholder: "https://www.instagram.com/p/...",
+    hint: "Paste a public post/reel, or open one in this tab, to download its photos & videos.",
+    isMedia: true,
+  },
 };
 
 let mode = "comments";
@@ -65,7 +75,11 @@ function applyMode() {
   document.querySelectorAll(".tab").forEach((t) => {
     t.classList.toggle("is-on", t.dataset.mode === mode);
   });
+  // Media has no "how many" — it returns every photo/video in the post.
+  $("countRow").hidden = !!m.isMedia;
+  $("run").textContent = m.isMedia ? "Get photos & videos" : "Export";
   $("result").hidden = true;
+  $("mediaResult").hidden = true;
   $("status").hidden = true;
 }
 
@@ -122,7 +136,7 @@ async function run() {
   const m = MODES[mode];
   const value = $("target").value.trim();
   if (!value) {
-    setStatus(`Enter ${mode === "comments" ? "a post or reel URL" : "a profile URL or @handle"}.`, "err");
+    setStatus(`Enter ${mode === "posts" ? "a profile URL or @handle" : "a post or reel URL"}.`, "err");
     return;
   }
   handleForName = nameFromValue(value);
@@ -130,9 +144,13 @@ async function run() {
 
   $("run").disabled = true;
   $("result").hidden = true;
-  setStatus(mode === "comments" ? "Pulling comments — reels with many comments can take a minute…" : "Pulling posts…", "run");
+  $("mediaResult").hidden = true;
+  const busy = m.isMedia ? "Finding the photos & videos…"
+    : mode === "comments" ? "Pulling comments — reels with many comments can take a minute…"
+    : "Pulling posts…";
+  setStatus(busy, "run");
 
-  const qs = new URLSearchParams({ [m.param]: value, count });
+  const qs = new URLSearchParams(m.isMedia ? { [m.param]: value } : { [m.param]: value, count });
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 290000);
 
@@ -158,8 +176,15 @@ async function run() {
     }
 
     $("status").hidden = true;
-    $("rowCount").textContent = rows.length.toLocaleString();
-    $("result").hidden = false;
+    if (m.isMedia) {
+      // Nicer download filenames: use the post owner's handle, not the URL's /p/ segment.
+      const owner = body.data && body.data.owner && body.data.owner.username;
+      if (owner) handleForName = owner;
+      renderMedia(rows);
+    } else {
+      $("rowCount").textContent = rows.length.toLocaleString();
+      $("result").hidden = false;
+    }
 
     const remaining = body.quota_remaining;
     $("quota").textContent = Number.isInteger(remaining) ? `${remaining} free lookups left this hour` : "";
@@ -207,6 +232,43 @@ function download(text, type, ext) {
   });
 }
 
+// --- Media (photos & videos) ----------------------------------------------
+
+function isVideo(item) {
+  return String(item.is_video).toLowerCase() === "true";
+}
+
+function downloadMedia(item, i) {
+  if (!item || !item.url) return;
+  const ext = isVideo(item) ? "mp4" : "jpg";
+  // chrome.downloads fetches the CDN URL directly; no host permission needed.
+  chrome.downloads.download({
+    url: item.url,
+    filename: `instagram-${handleForName}-${i + 1}.${ext}`,
+  });
+}
+
+function renderMedia(items) {
+  const list = $("mediaList");
+  list.innerHTML = "";
+  items.forEach((item, i) => {
+    const cell = document.createElement("div");
+    cell.className = "mcell";
+    const video = isVideo(item);
+    cell.innerHTML =
+      `<div class="mthumb">` +
+      (item.thumb ? `<img loading="lazy" src="${escapeHtml(item.thumb)}" alt="">` : "") +
+      `<span class="mbadge">${video ? "▶ video" : "photo"}</span></div>` +
+      `<button class="btn mdl">Download ${video ? "video" : "photo"}</button>`;
+    cell.querySelector(".mdl").addEventListener("click", () => downloadMedia(item, i));
+    list.appendChild(cell);
+  });
+  $("mediaCount").textContent = items.length.toLocaleString();
+  $("mediaNoun").textContent = items.length === 1 ? "file" : "files";
+  $("dlAllMedia").hidden = items.length < 2;
+  $("mediaResult").hidden = false;
+}
+
 // --- Wire up ---------------------------------------------------------------
 
 function wire() {
@@ -224,6 +286,7 @@ function wire() {
   });
   $("dlCsv").addEventListener("click", () => download(buildCsv(), "text/csv;charset=utf-8", "csv"));
   $("dlJson").addEventListener("click", () => download(buildJson(), "application/json", "json"));
+  $("dlAllMedia").addEventListener("click", () => rows.forEach((item, i) => downloadMedia(item, i)));
 
   applyMode();
   prefillFromTab();
