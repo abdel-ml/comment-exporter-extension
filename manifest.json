@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Instagram & YouTube Comment Exporter",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "description": "Export Instagram & YouTube comments, Instagram posts and media to CSV/JSON. Runs in your own tab, no server.",
   "author": "hammadi.dev",
   "homepage_url": "https://hammadi.dev",

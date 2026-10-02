@@ -134,6 +134,8 @@ function applyMode() {
   $("mediaResult").hidden = true;
   $("status").hidden = true;
   if ($("ai")) $("ai").hidden = true;
+  if ($("gw")) $("gw").hidden = true;
+  if ($("ins")) $("ins").hidden = true;
 }
 
 function classify(url) {
@@ -291,6 +293,11 @@ async function run() {
       $("rowCount").textContent = rows.length.toLocaleString();
       $("result").hidden = false;
       $("ai").hidden = mode !== "comments";
+      $("gw").hidden = mode !== "comments";
+      if (mode === "comments") renderInsights(); else $("ins").hidden = true;
+      gwOwner = out.owner || "";
+      $("gwRes").hidden = true;
+      if (mode === "comments") gwUpdatePool();
       suggestions = {}; $("aiList").innerHTML = ""; $("aiAns").hidden = true;
       if (out.note) setStatus(out.note);
     }
@@ -536,6 +543,125 @@ function renderMedia(items) {
   $("mediaResult").hidden = false;
 }
 
+// --- Comment insights (local, no API key) ------------------------------------
+const POS_W = /\b(love|loved|lovely|amazing|awesome|beautiful|gorgeous|great|perfect|best|cute|obsessed|wow|incredible|fantastic|nice|good|stunning|fire|queen|yes|need|want|thank|thanks|excellent|happy|favorite|favourite|adorable|wonderful|bonito|bonita|hermoso|hermosa|me encanta|encanta|precioso|genial|gracias|lindo|linda|belle|beau|magnifique|super|j'adore|merci|top|lindo|maravilhoso|amei|obrigad[oa]|perfeito|incrível|schön|toll|liebe|danke|bellissim[oa]|grazie|harika|güzel|bayıldım)\b/gi;
+const NEG_W = /\b(hate|bad|worst|ugly|terrible|awful|scam|fake|disappointed|disappointing|overpriced|expensive|broke|broken|never|boring|trash|horrible|sad|cringe|gross|no|not|don't|dont|stop|wrong|poor|refund|malo|mala|feo|fea|caro|estafa|horrible|nul|nulle|cher|arnaque|décevant|ruim|caro|horrível|schlecht|teuer|brutto|costoso|kötü|pahalı)\b/gi;
+const POS_E = /[😍❤️🥰😘💕💖💗💯🔥👏🙌✨😊😁🤩💪👍😻💜💙💚🧡🤍💛🫶]/gu;
+const NEG_E = /[😡🤬👎🤮😒💔😤🙄😞😢😭🤢]/gu;
+const STOP = new Set("the a an and or but to of in on for with is are was it this that i you he she we they my your me so be at as do not just have has had what when how all can its from will would there their them our out up get got like very really more one too also about here then than some any been did does am im dont amp que de la el en y los las un una por para con es lo le les des et du je tu il elle pas est o os as da do e um uma não com para mas ich du und der die das ist nicht ein eine il la di che e per non".split(" "));
+function sentimentOf(t) {
+  const p = (t.match(POS_W) || []).length + (t.match(POS_E) || []).length;
+  const n = (t.match(NEG_W) || []).length * 1.2 + (t.match(NEG_E) || []).length * 1.5;
+  return p > n ? "positive" : n > p ? "negative" : "neutral";
+}
+function renderInsights() {
+  const texts = rows.map((r) => String(r.text || "")).filter((t) => t.trim());
+  if (!texts.length) { $("ins").hidden = true; return; }
+  const c = { positive: 0, neutral: 0, negative: 0 };
+  const words = {}, emo = {};
+  let questions = 0, buyers = 0;
+  for (const t of texts) {
+    c[sentimentOf(t)]++;
+    if (t.includes("?")) questions++;
+    if (/price|how much|link|where (can|do|to) (i )?(buy|get)|cu[aá]nto|precio|d[oó]nde|prix|combien|quanto|preço|ship|env[ií]o/i.test(t)) buyers++;
+    for (const w of t.toLowerCase().replace(/@[\w.]+/g, " ").match(/[\p{L}']{3,}/gu) || []) if (!STOP.has(w)) words[w] = (words[w] || 0) + 1;
+    for (const e of t.match(/\p{Extended_Pictographic}/gu) || []) emo[e] = (emo[e] || 0) + 1;
+  }
+  const tot = texts.length, pct = (k) => Math.round((c[k] * 100) / tot);
+  $("insPos").style.width = pct("positive") + "%"; $("insNeu").style.width = pct("neutral") + "%"; $("insNeg").style.width = pct("negative") + "%";
+  $("insPct").innerHTML = `<b style="color:#16a34a">${pct("positive")}% positive</b> · ${pct("neutral")}% neutral · <b style="color:#dc2626">${pct("negative")}% negative</b>`;
+  $("insKpi").innerHTML = `<div><b>${tot.toLocaleString()}</b>comments</div><div><b>${questions.toLocaleString()}</b>questions</div><div><b>${buyers.toLocaleString()}</b>want to buy</div>`;
+  const top = Object.entries(words).sort((a, b) => b[1] - a[1]).slice(0, 24);
+  const max = top.length ? top[0][1] : 1;
+  $("insCloud").innerHTML = top.sort(() => Math.random() - 0.5)
+    .map(([w, n]) => `<span title="${n}×" style="font-size:${11 + Math.round((n / max) * 15)}px">${escapeHtml(w)}</span>`).join("");
+  $("insEmo").innerHTML = Object.entries(emo).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([e, n]) => `<span>${e}<small>×${n}</small></span>`).join("");
+  $("ins").hidden = false;
+}
+
+// --- Giveaway picker (fair: crypto random) ----------------------------------
+let gwOwner = "";
+function gwEntries() {
+  const tags = Number($("gwTags").value), kw = $("gwKw").value.trim().toLowerCase();
+  const unique = $("gwUnique").checked, exclOwner = $("gwOwner").checked;
+  const seen = new Set(), out = [];
+  for (const r of rows) {
+    const u = (r.author || "").toLowerCase(), t = r.text || "";
+    if (!u) continue;
+    if (exclOwner && gwOwner && u === gwOwner.toLowerCase()) continue;
+    // Tagging yourself or the post owner doesn't count as tagging a friend.
+    if (tags && new Set((t.match(/@[\w.]{2,30}/g) || []).map((m) => m.slice(1).toLowerCase().replace(/\.$/, ""))
+      .filter((m) => m !== u && m !== (gwOwner || "").toLowerCase())).size < tags) continue;
+    if (kw && !t.toLowerCase().includes(kw)) continue;
+    if (unique) { if (seen.has(u)) continue; seen.add(u); }
+    out.push(r);
+  }
+  return out;
+}
+function gwUpdatePool() {
+  const n = gwEntries().length;
+  $("gwPool").textContent = `${n.toLocaleString()} eligible ${n === 1 ? "entry" : "entries"} out of ${rows.length.toLocaleString()} comments.`;
+}
+function randInt(max) {
+  const a = new Uint32Array(1);
+  const lim = Math.floor(0xffffffff / max) * max;
+  do { crypto.getRandomValues(a); } while (a[0] >= lim);
+  return a[0] % max;
+}
+async function gwPick() {
+  const pool = gwEntries().slice();
+  const want = Math.min(Number($("gwN").value), pool.length);
+  if (!want) { $("gwPool").textContent = "No eligible entries with these rules."; return; }
+  $("gwGo").disabled = true;
+  $("gwRes").hidden = true;
+  const roll = $("gwRoll");
+  roll.hidden = false;
+  for (let i = 0; i < 22; i++) {           // a short shuffle animation
+    roll.textContent = "@" + (pool[randInt(pool.length)].author || "");
+    await new Promise((r) => setTimeout(r, 40 + i * 6));
+  }
+  const winners = [];
+  for (let i = 0; i < want; i++) winners.push(pool.splice(randInt(pool.length), 1)[0]);
+  roll.hidden = true;
+  const stamp = new Date().toLocaleString();
+  const res = $("gwRes");
+  res.innerHTML = winners.map((w, i) => `<div class="gw-win"><b>${want > 1 ? "#" + (i + 1) + " " : "🏆 "}@${escapeHtml(w.author)}</b>`
+    + `<p>“${escapeHtml((w.text || "").slice(0, 160))}”</p><p><a target="_blank" href="https://www.instagram.com/${encodeURIComponent(w.author)}/">Open profile →</a></p></div>`).join("")
+    + `<p class="gw-pool">Drawn at random from ${gwEntries().length.toLocaleString()} eligible entries · ${escapeHtml(stamp)}</p>`
+    + `<div class="gw-acts"><button id="gwAgain" class="btn ghost" type="button">Draw again</button><button id="gwCopy" class="btn ghost" type="button">Copy result</button>`
+    + `<button id="gwCard" class="btn" type="button">Save winner card</button></div>`;
+  res.hidden = false;
+  $("gwGo").disabled = false;
+  $("gwAgain").addEventListener("click", gwPick);
+  $("gwCopy").addEventListener("click", (e) => {
+    navigator.clipboard.writeText(`🎉 Giveaway winner${want > 1 ? "s" : ""}: ${winners.map((w) => "@" + w.author).join(", ")}\n`
+      + `Picked at random from ${gwEntries().length} eligible comments with Comment Exporter (hammadi.dev/extension).`);
+    e.target.textContent = "Copied ✓";
+  });
+  $("gwCard").addEventListener("click", () => gwCardPng(winners, stamp));
+}
+function gwCardPng(winners, stamp) {
+  const c = document.createElement("canvas");
+  c.width = 1080; c.height = 1080;
+  const g = c.getContext("2d");
+  const grad = g.createLinearGradient(0, 0, 1080, 1080);
+  grad.addColorStop(0, "#f58529"); grad.addColorStop(0.55, "#dd2a7b"); grad.addColorStop(1, "#8134af");
+  g.fillStyle = grad; g.fillRect(0, 0, 1080, 1080);
+  g.fillStyle = "#fff"; g.textAlign = "center";
+  g.font = "bold 64px -apple-system, Segoe UI, Roboto, sans-serif";
+  g.fillText(winners.length > 1 ? "Giveaway winners" : "Giveaway winner", 540, 250);
+  g.font = "bold 76px -apple-system, Segoe UI, Roboto, sans-serif";
+  winners.slice(0, 5).forEach((w, i) => g.fillText("@" + w.author, 540, 420 + i * 110));
+  g.font = "32px -apple-system, Segoe UI, Roboto, sans-serif";
+  g.fillText(`Picked at random from ${gwEntries().length.toLocaleString()} eligible comments`, 540, 900);
+  g.font = "26px -apple-system, Segoe UI, Roboto, sans-serif";
+  g.fillText(`${stamp} · hammadi.dev/extension`, 540, 950);
+  c.toBlob((b) => {
+    const url = URL.createObjectURL(b);
+    chrome.downloads.download({ url, filename: `giveaway-winner-${handleForName}.png`, saveAs: true }, () => setTimeout(() => URL.revokeObjectURL(url), 60000));
+  }, "image/png");
+}
+
 // --- AI replies & chat (user's own OpenAI / Claude key, stored locally) -------
 const AI_DEFAULT = { openai: "gpt-4o-mini", anthropic: "claude-haiku-4-5-20251001" };
 let ai = { prov: "openai", key: "", model: "", voice: "" };
@@ -705,6 +831,8 @@ function wire() {
   $("dlCsv").addEventListener("click", () => download(buildCsv(), "text/csv;charset=utf-8", "csv"));
   $("dlJson").addEventListener("click", () => download(buildJson(), "application/json", "json"));
   $("dlAllMedia").addEventListener("click", () => rows.forEach((item, i) => downloadMedia(item, i)));
+  ["gwTags", "gwKw", "gwUnique", "gwOwner"].forEach((id) => $(id).addEventListener(id === "gwKw" ? "input" : "change", gwUpdatePool));
+  $("gwGo").addEventListener("click", gwPick);
   $("aiCfgBtn").addEventListener("click", () => { $("aiCfg").hidden = !$("aiCfg").hidden; });
   $("aiSave").addEventListener("click", aiSave);
   $("aiSuggest").addEventListener("click", aiSuggest);

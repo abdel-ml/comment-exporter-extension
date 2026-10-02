@@ -146,3 +146,31 @@ html.inpage .hd { padding-right: 46px; }
 .ai-chat{display:flex;gap:6px;margin-top:6px}.ai-chat input{flex:1;min-width:0}
 .ai-ans{margin-top:8px;font-size:12.5px;white-space:pre-wrap;background:#fff;border:1px solid #eee;border-radius:10px;padding:8px}
 .ai-note{color:#888;font-size:11px;margin:8px 0 0}
+
+.gw{margin-top:12px;border:1px solid #f0d9e6;border-radius:12px;padding:10px 12px;background:linear-gradient(135deg,#fff7fb,#fff)}
+.gw-hd{margin-bottom:8px}
+.gw-opts{display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;font-size:12.5px}
+.gw-opts label{display:flex;flex-direction:column;gap:3px;font-weight:600;color:#444}
+.gw-opts label.wide{grid-column:1/-1}.gw-opts label.chk{flex-direction:row;align-items:center;gap:6px;font-weight:500;grid-column:1/-1}
+.gw-opts select,.gw-opts input[type=text]{padding:6px 8px;border:1px solid #e3d6de;border-radius:8px;font:inherit;font-size:12.5px}
+.gw-pool{margin:8px 0;color:#666;font-size:12px}
+.gw-roll{margin-top:10px;text-align:center;font-size:18px;font-weight:800;color:#c13584;padding:14px;border-radius:10px;background:#fff;border:1px dashed #e7b7cf}
+.gw-res{margin-top:10px}
+.gw-win{border-radius:12px;padding:12px;margin-bottom:8px;color:#fff;background:linear-gradient(135deg,#f58529,#dd2a7b 55%,#8134af);animation:gwpop .35s ease-out}
+.gw-win b{font-size:16px}.gw-win p{margin:6px 0 0;font-size:12.5px;opacity:.95}
+.gw-win a{color:#fff;font-weight:700}
+.gw-acts{display:flex;gap:8px;flex-wrap:wrap}
+@keyframes gwpop{from{transform:scale(.92);opacity:0}to{transform:none;opacity:1}}
+
+.ins{margin-top:12px;border:1px solid #e6e3de;border-radius:12px;padding:10px 12px;background:#fff}
+.ins-bar{display:flex;height:10px;border-radius:999px;overflow:hidden;background:#eee}
+.ins-bar i{display:block;height:100%;transition:width .6s ease}
+#insPos{background:#16a34a}#insNeu{background:#a1a1aa}#insNeg{background:#dc2626}
+.ins-pct{margin:6px 0 8px;font-size:12px;color:#555}
+.ins-kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px}
+.ins-kpi div{text-align:center;border:1px solid #eee;border-radius:9px;padding:6px 4px;font-size:11px;color:#666}
+.ins-kpi b{display:block;font-size:16px;color:#111}
+.ins-cloud{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline;line-height:1.2;margin:6px 0}
+.ins-cloud span{color:#8134af;font-weight:700}
+.ins-cloud span:nth-child(3n){color:#dd2a7b}.ins-cloud span:nth-child(3n+1){color:#f58529}
+.ins-emo{font-size:18px;display:flex;flex-wrap:wrap;gap:8px}.ins-emo small{font-size:11px;color:#888}

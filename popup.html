@@ -61,6 +61,30 @@
       </div>
     </div>
 
+    <div id="ins" class="ins" hidden>
+      <div class="gw-hd"><b>📊 Comment insights</b></div>
+      <div class="ins-bar"><i id="insPos"></i><i id="insNeu"></i><i id="insNeg"></i></div>
+      <p id="insPct" class="ins-pct"></p>
+      <div id="insKpi" class="ins-kpi"></div>
+      <div id="insCloud" class="ins-cloud"></div>
+      <div id="insEmo" class="ins-emo"></div>
+    </div>
+
+    <div id="gw" class="gw" hidden>
+      <div class="gw-hd"><b>🎁 Pick a giveaway winner</b></div>
+      <div class="gw-opts">
+        <label>Winners <select id="gwN"><option>1</option><option>2</option><option>3</option><option>5</option><option>10</option></select></label>
+        <label>Must tag <select id="gwTags"><option value="0">no one</option><option value="1">1 friend</option><option value="2">2 friends</option><option value="3">3 friends</option></select></label>
+        <label class="wide">Must contain <input id="gwKw" type="text" placeholder="optional keyword, e.g. done" /></label>
+        <label class="chk"><input id="gwUnique" type="checkbox" checked /> One entry per person</label>
+        <label class="chk"><input id="gwOwner" type="checkbox" checked /> Exclude the post owner</label>
+      </div>
+      <p id="gwPool" class="gw-pool"></p>
+      <button id="gwGo" type="button" class="btn">Pick winner</button>
+      <div id="gwRoll" class="gw-roll" hidden></div>
+      <div id="gwRes" class="gw-res" hidden></div>
+    </div>
+
     <div id="ai" class="ai" hidden>
       <div class="ai-hd"><b>✨ AI replies & chat</b><button id="aiCfgBtn" type="button" class="link">⚙ API key</button></div>
       <div id="aiCfg" class="ai-cfg" hidden>
