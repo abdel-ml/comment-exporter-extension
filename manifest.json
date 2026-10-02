@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Instagram Comment & Post Exporter",
-  "version": "1.1.0",
-  "description": "Export all comments from any public Instagram post or reel, all posts from a profile, or download a post's photos & videos — CSV, JSON or media, in one click.",
+  "version": "2.0.0",
+  "description": "Export all comments of any Instagram post or reel, all posts of a profile, or a post's photos & videos to CSV/JSON. Runs in your own Instagram tab - nothing goes through a server.",
   "author": "hammadi.dev",
   "homepage_url": "https://hammadi.dev",
   "action": {
@@ -14,6 +14,13 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "permissions": ["activeTab", "downloads"],
-  "host_permissions": ["https://hammadi.dev/*"]
+  "permissions": [
+    "activeTab",
+    "downloads",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://www.instagram.com/*"
+  ]
 }
