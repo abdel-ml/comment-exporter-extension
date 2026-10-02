@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Instagram & YouTube Comment Exporter",
   "version": "2.1.0",
-  "description": "Export all comments of any Instagram post/reel or YouTube video, all posts of an Instagram profile, or a post's photos & videos to CSV/JSON. Runs in your own tab - nothing goes through a server.",
+  "description": "Export Instagram & YouTube comments, Instagram posts and media to CSV/JSON. Runs in your own tab, no server.",
   "author": "hammadi.dev",
   "homepage_url": "https://hammadi.dev",
   "action": {
