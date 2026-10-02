@@ -124,3 +124,7 @@ select { width: auto; padding-right: 26px; }
   .btn.ghost { background: #16181c; }
   .status.err { background: #2a1614; }
 }
+
+.acct{margin:10px 14px 0;padding:9px 12px;border-radius:10px;background:#faf3f7;border:1px solid #f0d9e6;font-size:12.5px;color:#444;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.acct b{color:#111}.acct a,.acct button{font:inherit;font-weight:700;color:#c13584;background:none;border:0;padding:0;cursor:pointer;text-decoration:none}
+.acct .pro{background:linear-gradient(135deg,#f58529,#dd2a7b 55%,#8134af);color:#fff;border-radius:999px;padding:5px 11px}

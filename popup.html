@@ -10,10 +10,12 @@
   <header class="hd">
     <div class="logo" aria-hidden="true">IG</div>
     <div>
-      <h1>Instagram Exporter</h1>
-      <p class="sub">Comments &amp; posts → CSV / JSON</p>
+      <h1>Comment Exporter</h1>
+      <p class="sub">Instagram &amp; YouTube → CSV / JSON</p>
     </div>
   </header>
+
+  <div id="acct" class="acct">Checking your plan…</div>
 
   <div class="tabs" role="tablist">
     <button class="tab is-on" data-mode="comments" role="tab">Comments</button>
@@ -59,10 +61,11 @@
   </main>
 
   <footer class="ft">
-    <span id="quota">Runs in your Instagram tab · private to you</span>
-    <a href="https://hammadi.dev/reel-comment-checker" target="_blank" rel="noopener">Find buyers in comments →</a>
+    <span id="quota">Runs in your own tab · private to you</span>
+    <a id="feedback" href="https://hammadi.dev/feedback?from=extension" target="_blank" rel="noopener">💬 Share feedback</a>
   </footer>
 
+  <script src="platforms.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

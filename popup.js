@@ -48,6 +48,8 @@ let mode = "comments";
 let rows = [];
 let handleForName = "instagram";
 let igTabId = null;
+let site = "instagram"; // or "youtube"
+const SITE_RE = { instagram: /^https:\/\/www\.instagram\.com\//, youtube: /^https:\/\/(www|m)\.youtube\.com\// };
 
 const $ = (id) => document.getElementById(id);
 
@@ -74,6 +76,9 @@ function applyMode() {
 function classify(url) {
   try {
     const u = new URL(url);
+    if (/(^|\.)youtube\.com$/.test(u.hostname) && (u.pathname === "/watch" || u.pathname.startsWith("/shorts/"))) {
+      return { mode: "comments", value: u.href, site: "youtube" };
+    }
     if (!/(^|\.)instagram\.com$/.test(u.hostname)) return null;
     if (/^\/(p|reel|reels|tv)\//.test(u.pathname)) return { mode: "comments", value: u.origin + u.pathname };
     const seg = u.pathname.split("/").filter(Boolean);
@@ -84,11 +89,24 @@ function classify(url) {
 }
 
 // The Instagram tab to work in: the active tab if it is Instagram, else any open one.
-async function findInstagramTab() {
+async function findInstagramTab(want) {
   const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (active && /^https:\/\/www\.instagram\.com\//.test(active.url || "")) return active;
-  const tabs = await chrome.tabs.query({ url: "https://www.instagram.com/*" });
+  for (const k of want ? [want] : ["instagram", "youtube"]) {
+    if (active && SITE_RE[k].test(active.url || "")) return active;
+  }
+  const tabs = await chrome.tabs.query({ url: want === "youtube" ? ["https://www.youtube.com/*"] : ["https://www.instagram.com/*"] });
   return tabs[0] || null;
+}
+
+function setSite(s) {
+  site = s;
+  document.querySelectorAll('.tab[data-mode="posts"], .tab[data-mode="media"]').forEach((t) => { t.hidden = s === "youtube"; });
+  if (s === "youtube") {
+    mode = "comments";
+    MODES.comments.placeholder = "https://www.youtube.com/watch?v=...";
+    MODES.comments.label = "YouTube video or Short";
+    MODES.comments.hint = "Open the video in a YouTube tab.";
+  }
 }
 
 async function prefillFromTab() {
@@ -98,6 +116,7 @@ async function prefillFromTab() {
     igTabId = tab.id;
     const hit = classify(tab.url);
     if (hit) {
+      setSite(hit.site || "instagram");
       mode = hit.mode;
       applyMode();
       $("target").value = hit.value;
@@ -138,25 +157,30 @@ async function run() {
     setStatus(`Enter ${mode === "posts" ? "a profile URL or @handle" : "a post or reel URL"}.`, "err");
     return;
   }
-  const tab = await findInstagramTab();
+  const isYt = /youtube\.com|youtu\.be/.test(value);
+  setSite(isYt ? "youtube" : "instagram");
+  const tab = await findInstagramTab(site);
   if (!tab) {
-    setStatus("Open instagram.com in a tab and log in, then try again.", "err");
+    setStatus(isYt ? "Open the video in a YouTube tab, then try again." : "Open instagram.com in a tab and log in, then try again.", "err");
     return;
+  }
+  if (isYt && tab.url.split("&")[0] !== value.split("&")[0]) {
+    await chrome.tabs.update(tab.id, { url: value });
+    await new Promise((r) => setTimeout(r, 4000));
   }
   igTabId = tab.id;
   handleForName = nameFromValue(value);
   const count = Number($("count").value) || 500;
+  if (!(await allowExport())) return;
 
   $("run").disabled = true;
   $("result").hidden = true;
   $("mediaResult").hidden = true;
   setStatus("Starting in your Instagram tab…", "run");
   try {
-    const [res] = await chrome.scripting.executeScript({
-      target: { tabId: igTabId },
-      func: igxScrape,
-      args: [mode, value, count],
-    });
+    const [res] = await chrome.scripting.executeScript(site === "youtube"
+      ? { target: { tabId: igTabId }, func: ytxComments, args: [count] }
+      : { target: { tabId: igTabId }, func: igxScrape, args: [mode, value, count] });
     let out = res && res.result;
     if (out && out.navigate) {
       setStatus("Opening the profile in your Instagram tab…", "run");
@@ -176,6 +200,7 @@ async function run() {
     }
     rows = out.rows || [];
     if (out.owner) handleForName = out.owner;
+    if (rows.length) markUsed();
     if (!rows.length) {
       setStatus("No " + m.noun + " found. The account may be private, or the post has none.", "err");
       return;
@@ -386,6 +411,64 @@ function renderMedia(items) {
   $("mediaResult").hidden = false;
 }
 
+// --- Account: 1 free export, then Pro ($3/month) ----------------------------
+// Only the licence check talks to hammadi.dev; scraped data never leaves the tab.
+const HD = "https://hammadi.dev";
+let acct = null;
+
+async function loadAccount() {
+  const el = $("acct");
+  try {
+    const r = await fetch(`${HD}/public/v1/ext/status`, { credentials: "include" });
+    acct = await r.json();
+  } catch (_) {
+    acct = null;
+  }
+  if (!acct) { el.textContent = "Can't reach hammadi.dev right now."; return; }
+  if (!acct.logged_in) {
+    el.innerHTML = `<span>Log in to get <b>1 free export</b></span><a href="${HD}/login?next=/extension" target="_blank" rel="noopener">Log in / sign up →</a>`;
+  } else if (acct.pro) {
+    el.innerHTML = `<span>✓ <b>Pro</b> · unlimited exports</span><span>${escapeHtml(acct.email)}</span>`;
+  } else if (acct.free_left > 0) {
+    el.innerHTML = `<span><b>${acct.free_left} free export</b> left</span><button class="pro" id="goPro">Go Pro · $3/mo</button>`;
+  } else {
+    el.innerHTML = `<span>Free export used</span><button class="pro" id="goPro">Unlimited · $3/month</button>`;
+  }
+  const b = document.getElementById("goPro");
+  if (b) b.addEventListener("click", goPro);
+}
+
+async function goPro() {
+  try {
+    const r = await fetch(`${HD}/public/v1/ext/checkout`, { method: "POST", credentials: "include" });
+    const d = await r.json();
+    if (d.url) chrome.tabs.create({ url: d.url });
+    else setStatus((d.detail && d.detail.error) || "Log in first.", "err");
+  } catch (_) {
+    setStatus("Can't reach hammadi.dev right now.", "err");
+  }
+}
+
+// Before an export: logged in and (Pro or a free export left)? The free export
+// is only spent after an export succeeds (markUsed), so a failure costs nothing.
+async function allowExport() {
+  await loadAccount();
+  if (!acct) { setStatus("Can't reach hammadi.dev right now.", "err"); return false; }
+  if (!acct.logged_in) {
+    setStatus("Log in to hammadi.dev first: your first export is free.", "err");
+    chrome.tabs.create({ url: `${HD}/login?next=/extension` });
+    return false;
+  }
+  if (acct.pro || acct.free_left > 0) return true;
+  setStatus("Your free export is used. Go Pro for unlimited exports: $3/month.", "err");
+  return false;
+}
+
+async function markUsed() {
+  try { await fetch(`${HD}/public/v1/ext/use`, { method: "POST", credentials: "include" }); } catch (_) {}
+  loadAccount();
+}
+
 // --- Wire up ---------------------------------------------------------------
 
 function wire() {
@@ -404,6 +487,7 @@ function wire() {
   $("dlAllMedia").addEventListener("click", () => rows.forEach((item, i) => downloadMedia(item, i)));
   applyMode();
   prefillFromTab();
+  loadAccount();
 }
 
 if (document.readyState !== "loading") wire();
