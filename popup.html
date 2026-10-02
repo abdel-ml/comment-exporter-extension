@@ -17,10 +17,17 @@
 
   <div id="acct" class="acct">Checking your plan…</div>
 
-  <div class="tabs" role="tablist">
-    <button class="tab is-on" data-mode="comments" role="tab">Comments</button>
-    <button class="tab" data-mode="posts" role="tab">Posts</button>
-    <button class="tab" data-mode="media" role="tab">Media</button>
+  <div class="modebar">
+    <label for="modeSel">Export</label>
+    <select id="modeSel">
+      <option value="comments">Comments</option>
+      <option value="posts">Posts of a profile</option>
+      <option value="likers">Likers of a post</option>
+      <option value="followers">Followers</option>
+      <option value="following">Following</option>
+      <option value="media">Photos &amp; videos</option>
+      <option value="ytsearch">YouTube search results</option>
+    </select>
   </div>
 
   <main class="body">

@@ -131,3 +131,7 @@ select { width: auto; padding-right: 26px; }
 /* Opened inside the page panel: fill the panel instead of the 340px popup width. */
 html.inpage body { width: auto; }
 html.inpage .hd { padding-right: 46px; }
+
+.modebar{display:flex;align-items:center;gap:10px;margin:10px 14px 0}
+.modebar label{font-weight:700;font-size:13px}
+.modebar select{flex:1;padding:8px 10px;border-radius:9px;border:1px solid #e3d6de;font:inherit;font-size:13.5px;background:#fff}

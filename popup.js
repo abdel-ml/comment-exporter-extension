@@ -35,6 +35,55 @@ const MODES = {
       ["caption", (r) => r.caption],
     ],
   },
+  likers: {
+    noun: "likers",
+    label: "Post or reel URL",
+    placeholder: "https://www.instagram.com/p/...",
+    hint: "Open a post or reel in your Instagram tab. Instagram shows up to ~100 likers per post.",
+    columns: [
+      ["username", (r) => r.username],
+      ["full_name", (r) => r.full_name],
+      ["verified", (r) => r.verified],
+      ["private", (r) => r.private],
+      ["profile", (r) => r.username ? `https://www.instagram.com/${r.username}/` : ""],
+    ],
+  },
+  followers: {
+    noun: "followers",
+    label: "Instagram profile URL or @handle",
+    placeholder: "@nasa",
+    hint: "Instagram shows only ~50 followers of other accounts; your own account's list is complete.",
+    columns: [
+      ["username", (r) => r.username],
+      ["full_name", (r) => r.full_name],
+      ["verified", (r) => r.verified],
+      ["private", (r) => r.private],
+      ["profile", (r) => r.username ? `https://www.instagram.com/${r.username}/` : ""],
+    ],
+  },
+  following: {
+    noun: "accounts",
+    label: "Instagram profile URL or @handle",
+    placeholder: "@nasa",
+    hint: "Public profiles, or private ones you follow.",
+    columns: [
+      ["username", (r) => r.username],
+      ["full_name", (r) => r.full_name],
+      ["verified", (r) => r.verified],
+      ["private", (r) => r.private],
+      ["profile", (r) => r.username ? `https://www.instagram.com/${r.username}/` : ""],
+    ],
+  },
+  ytsearch: {
+    noun: "videos",
+    label: "YouTube search",
+    placeholder: "https://www.youtube.com/results?search_query=...",
+    hint: "Open a YouTube search in your tab, or type what to search.",
+    columns: [
+      ["title", (r) => r.title], ["channel", (r) => r.channel], ["views", (r) => r.views], ["published", (r) => r.published],
+      ["duration", (r) => r.duration], ["url", (r) => r.url], ["channel_url", (r) => r.channel_url], ["description", (r) => r.description],
+    ],
+  },
   media: {
     noun: "media files",
     label: "Post or reel URL",
@@ -65,7 +114,7 @@ function applyMode() {
   $("target").placeholder = m.placeholder;
   $("inputHint").textContent = m.hint;
   $("rowNoun").textContent = m.noun;
-  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("is-on", t.dataset.mode === mode));
+  $("modeSel").value = mode;
   $("countRow").hidden = !!m.isMedia;
   $("run").textContent = m.isMedia ? "Get photos & videos" : "Export";
   $("result").hidden = true;
@@ -76,6 +125,9 @@ function applyMode() {
 function classify(url) {
   try {
     const u = new URL(url);
+    if (/(^|\.)youtube\.com$/.test(u.hostname) && u.pathname === "/results") {
+      return { mode: "ytsearch", value: u.href, site: "youtube" };
+    }
     if (/(^|\.)youtube\.com$/.test(u.hostname) && (u.pathname === "/watch" || u.pathname.startsWith("/shorts/"))) {
       return { mode: "comments", value: u.href, site: "youtube" };
     }
@@ -100,22 +152,33 @@ async function findInstagramTab(want) {
 
 function setSite(s) {
   site = s;
-  document.querySelectorAll('.tab[data-mode="posts"], .tab[data-mode="media"]').forEach((t) => { t.hidden = s === "youtube"; });
+  for (const o of $("modeSel").options) o.hidden = s === "youtube" ? !["comments", "ytsearch"].includes(o.value) : o.value === "ytsearch";
   if (s === "youtube") {
-    mode = "comments";
+    if (!["comments", "ytsearch"].includes(mode)) mode = "comments";
     MODES.comments.placeholder = "https://www.youtube.com/watch?v=...";
     MODES.comments.label = "YouTube video or Short";
     MODES.comments.hint = "Open the video in a YouTube tab.";
   }
 }
 
-async function prefillFromTab() {
+async function prefillFromTab(keepMode) {
   try {
     const tab = await findInstagramTab();
     if (!tab) return;
     igTabId = tab.id;
     const hit = classify(tab.url);
-    if (hit) {
+    if (!hit) return;
+    if (keepMode) {
+      // Same page, other export: reuse the URL when it fits the chosen mode.
+      const postLike = ["comments", "likers", "media"].includes(mode), profLike = ["posts", "followers", "following"].includes(mode);
+      if ((postLike && /\/(p|reel|reels|tv)\//.test(hit.value)) || (profLike && hit.mode === "posts") || (mode === hit.mode)) $("target").value = hit.value;
+      else if (profLike && /instagram\.com/.test(tab.url)) {
+        const owner = document.querySelector("#target").value;
+        if (!owner) $("target").value = "";
+      }
+      return;
+    }
+    {
       setSite(hit.site || "instagram");
       mode = hit.mode;
       applyMode();
@@ -157,15 +220,17 @@ async function run() {
     setStatus(`Enter ${mode === "posts" ? "a profile URL or @handle" : "a post or reel URL"}.`, "err");
     return;
   }
-  const isYt = /youtube\.com|youtu\.be/.test(value);
+  const isYt = mode === "ytsearch" || /youtube\.com|youtu\.be/.test(value);
   setSite(isYt ? "youtube" : "instagram");
   const tab = await findInstagramTab(site);
   if (!tab) {
     setStatus(isYt ? "Open the video in a YouTube tab, then try again." : "Open instagram.com in a tab and log in, then try again.", "err");
     return;
   }
-  if (isYt && tab.url.split("&")[0] !== value.split("&")[0]) {
-    await chrome.tabs.update(tab.id, { url: value });
+  const ytTarget = mode === "ytsearch" && !/^https?:/.test(value)
+    ? `https://www.youtube.com/results?search_query=${encodeURIComponent(value)}` : value;
+  if (isYt && tab.url !== ytTarget && tab.url.split("&")[0] !== ytTarget.split("&")[0]) {
+    await chrome.tabs.update(tab.id, { url: ytTarget });
     await new Promise((r) => setTimeout(r, 4000));
   }
   igTabId = tab.id;
@@ -179,7 +244,8 @@ async function run() {
   setStatus("Starting in your Instagram tab…", "run");
   try {
     const [res] = await chrome.scripting.executeScript(site === "youtube"
-      ? { target: { tabId: igTabId }, func: ytxComments, args: [count] }
+      ? (mode === "ytsearch" ? { target: { tabId: igTabId }, func: ytxSearch, args: [count] }
+                             : { target: { tabId: igTabId }, func: ytxComments, args: [count] })
       : { target: { tabId: igTabId }, func: igxScrape, args: [mode, value, count] });
     let out = res && res.result;
     if (out && out.navigate) {
@@ -338,6 +404,36 @@ async function igxScrape(mode, value, limit) {
       return { rows: rows.slice(0, limit), owner: username };
     }
 
+    if (mode === "likers") {
+      const code = codeOf(value);
+      if (!code) return { error: "That doesn't look like a post or reel link." };
+      const d = await api(`/api/v1/media/${shortcodeToPk(code)}/likers/`);
+      const rows = (d.users || []).slice(0, limit).map((u) => ({ username: u.username, full_name: u.full_name,
+        verified: !!u.is_verified, private: !!u.is_private }));
+      return { rows, owner: code };
+    }
+
+    if (mode === "followers" || mode === "following") {
+      const m = String(value).match(/instagram\.com\/([^/?#]+)/) || String(value).match(/@?([\w.]+)/);
+      const username = m && m[1].replace(/^@/, "");
+      if (!username) return { error: "Enter a profile URL or @handle." };
+      const found = await api(`/web/search/topsearch/?query=${encodeURIComponent(username)}&context=blended`);
+      const hit = (found.users || []).map((x) => x.user).find((u) => (u.username || "").toLowerCase() === username.toLowerCase());
+      if (!hit) return { error: "Profile not found." };
+      const uid = hit.pk || hit.id;
+      const rows = [];
+      let maxId = null, guard = 0;
+      do {
+        const q = `count=50` + (mode === "followers" ? "&search_surface=follow_list_page" : "") + (maxId ? `&max_id=${encodeURIComponent(maxId)}` : "");
+        const d = await api(`/api/v1/friendships/${uid}/${mode}/?${q}`);
+        for (const u of d.users || []) rows.push({ username: u.username, full_name: u.full_name, verified: !!u.is_verified, private: !!u.is_private });
+        progress(rows.length, limit, `${rows.length.toLocaleString()} ${mode === "followers" ? "followers" : "accounts"}…`);
+        maxId = d.next_max_id || null;
+        if (maxId) await pace();
+      } while (maxId && rows.length < limit && ++guard < 400);
+      return { rows: rows.slice(0, limit), owner: username };
+    }
+
     // media
     const code = codeOf(value);
     if (!code) return { error: "That doesn't look like a post or reel link." };
@@ -473,13 +569,13 @@ async function markUsed() {
 
 function wire() {
   if (new URLSearchParams(location.search).get("inpage")) document.documentElement.classList.add("inpage");
-  document.querySelectorAll(".tab").forEach((t) => {
-    t.addEventListener("click", () => {
-      if (t.dataset.mode === mode) return;
-      mode = t.dataset.mode;
-      $("target").value = "";
-      applyMode();
-    });
+  $("modeSel").addEventListener("change", () => {
+    mode = $("modeSel").value;
+    if (mode === "ytsearch") setSite("youtube");
+    else if (site === "youtube" && mode !== "comments") setSite("instagram");
+    $("target").value = "";
+    applyMode();
+    prefillFromTab(true);
   });
   $("run").addEventListener("click", run);
   $("target").addEventListener("keydown", (e) => { if (e.key === "Enter") run(); });

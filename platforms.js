@@ -96,3 +96,58 @@ async function ytxComments(limit) {
     return { error: e && e.message ? e.message : String(e) };
   }
 }
+
+// YouTube search results page: every video in the results (scrolls the
+// search the same way the page does, through youtubei "search" continuations).
+async function ytxSearch(limit) {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const progress = (n, total, text) => { try { chrome.runtime.sendMessage({ igxProgress: { n, total, text } }); } catch (_) {} };
+  try {
+    if (location.pathname !== "/results") return { error: "Open a YouTube search (youtube.com/results?search_query=…) in this tab first." };
+    const html = await (await fetch(location.href, { credentials: "include" })).text();
+    const key = (html.match(/"INNERTUBE_API_KEY":"([^"]+)"/) || [])[1];
+    const ver = (html.match(/"INNERTUBE_CLIENT_VERSION":"([^"]+)"/) || [])[1] || "2.20260101.00.00";
+    const dataTxt = (html.match(/var ytInitialData = (\{.*?\});<\/script>/s) || [])[1];
+    if (!key || !dataTxt) return { error: "YouTube didn't return the search page. Reload it and try again." };
+    const context = { client: { clientName: "WEB", clientVersion: ver, hl: "en" } };
+    const text = (t) => (t && (t.simpleText || (t.runs || []).map((x) => x.text).join(""))) || "";
+    const rows = [], seen = new Set();
+    let token = null;
+    function take(obj) {
+      (function walk(o) {
+        if (!o || typeof o !== "object") return;
+        const v = o.videoRenderer;
+        if (v && v.videoId && !seen.has(v.videoId)) {
+          seen.add(v.videoId);
+          const ch = ((v.ownerText || {}).runs || [{}])[0];
+          rows.push({
+            title: text(v.title), channel: ch.text || "",
+            channel_url: ch.navigationEndpoint ? "https://www.youtube.com" + ((ch.navigationEndpoint.browseEndpoint || {}).canonicalBaseUrl || "") : "",
+            views: text(v.viewCountText), published: text(v.publishedTimeText), duration: text(v.lengthText),
+            url: "https://www.youtube.com/watch?v=" + v.videoId,
+            description: ((v.detailedMetadataSnippets || [])[0] ? text(v.detailedMetadataSnippets[0].snippetText) : text(v.descriptionSnippet)),
+          });
+        }
+        const c = o.continuationItemRenderer;
+        if (c && c.continuationEndpoint && c.continuationEndpoint.continuationCommand) token = c.continuationEndpoint.continuationCommand.token;
+        for (const k in o) if (k !== "videoRenderer") walk(o[k]);
+      })(obj);
+    }
+    take(JSON.parse(dataTxt));
+    let guard = 0;
+    while (token && rows.length < limit && guard++ < 100) {
+      const t = token; token = null;
+      progress(rows.length, limit, `${rows.length.toLocaleString()} videos…`);
+      await sleep(700 + Math.random() * 500);
+      const r = await fetch(`/youtubei/v1/search?key=${key}&prettyPrint=false`, {
+        method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ context, continuation: t }),
+      });
+      if (!r.ok) break;
+      take(await r.json());
+    }
+    const q = new URLSearchParams(location.search).get("search_query") || "youtube";
+    return { rows: rows.slice(0, limit), owner: q.replace(/[^\w.-]+/g, "-").slice(0, 40) };
+  } catch (e) {
+    return { error: e && e.message ? e.message : String(e) };
+  }
+}
