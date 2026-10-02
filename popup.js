@@ -120,6 +120,7 @@ function applyMode() {
   $("result").hidden = true;
   $("mediaResult").hidden = true;
   $("status").hidden = true;
+  if ($("ai")) $("ai").hidden = true;
 }
 
 function classify(url) {
@@ -276,6 +277,8 @@ async function run() {
     else {
       $("rowCount").textContent = rows.length.toLocaleString();
       $("result").hidden = false;
+      $("ai").hidden = mode !== "comments";
+      suggestions = {}; $("aiList").innerHTML = ""; $("aiAns").hidden = true;
       if (out.note) setStatus(out.note);
     }
   } catch (err) {
@@ -507,6 +510,98 @@ function renderMedia(items) {
   $("mediaResult").hidden = false;
 }
 
+// --- AI replies & chat (user's own OpenAI / Claude key, stored locally) -------
+const AI_DEFAULT = { openai: "gpt-4o-mini", anthropic: "claude-haiku-4-5-20251001" };
+let ai = { prov: "openai", key: "", model: "", voice: "" };
+let suggestions = {};
+
+async function aiLoad() {
+  try { ai = { ...ai, ...((await chrome.storage.local.get("igxAi")).igxAi || {}) }; } catch (_) {}
+  $("aiProv").value = ai.prov; $("aiKey").value = ai.key; $("aiModel").value = ai.model; $("aiVoice").value = ai.voice;
+}
+async function aiSave() {
+  ai = { prov: $("aiProv").value, key: $("aiKey").value.trim(), model: $("aiModel").value.trim(), voice: $("aiVoice").value.trim() };
+  await chrome.storage.local.set({ igxAi: ai });
+  $("aiCfg").hidden = true;
+}
+async function llm(system, user, maxTokens = 1200) {
+  if (!ai.key) { $("aiCfg").hidden = false; throw new Error("Add your OpenAI or Claude API key first (⚙ API key)."); }
+  const model = ai.model || AI_DEFAULT[ai.prov];
+  if (ai.prov === "anthropic") {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": ai.key, "anthropic-version": "2023-06-01",
+                 "anthropic-dangerous-direct-browser-access": "true" },
+      body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: "user", content: user }] }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error((d.error && d.error.message) || `Claude error ${r.status}`);
+    return (d.content || []).map((c) => c.text || "").join("");
+  }
+  const r = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${ai.key}` },
+    body: JSON.stringify({ model, messages: [{ role: "system", content: system }, { role: "user", content: user }] }),
+  });
+  const d = await r.json();
+  if (!r.ok) throw new Error((d.error && d.error.message) || `OpenAI error ${r.status}`);
+  return d.choices[0].message.content || "";
+}
+function pickComments(n) {
+  // Questions and buying intent first, then the most-liked comments.
+  const score = (r) => (/\?/.test(r.text || "") ? 3 : 0) + (/price|how much|link|where|buy|ship|cu[aá]nto|precio|prix|combien/i.test(r.text || "") ? 4 : 0)
+    + Math.log10(1 + (parseInt(String(r.likes).replace(/\D/g, ""), 10) || 0));
+  return rows.map((r, i) => ({ ...r, i })).filter((r) => (r.text || "").trim() && !r.is_reply)
+    .sort((a, b) => score(b) - score(a)).slice(0, n);
+}
+async function aiSuggest() {
+  const btn = $("aiSuggest");
+  btn.disabled = true; btn.textContent = "Writing replies…";
+  try {
+    const picks = pickComments(15);
+    const sys = "You write short, warm, human replies to social media comments on behalf of the account owner. "
+      + "Answer questions helpfully, thank compliments, handle complaints calmly. Max 1-2 sentences, match the comment's language, "
+      + "no hashtags. " + (ai.voice ? `About the account: ${ai.voice}.` : "")
+      + " Return ONLY JSON: [{\"i\": <index>, \"reply\": \"...\"}].";
+    const user = JSON.stringify(picks.map((p) => ({ i: p.i, author: p.author, comment: p.text })));
+    const out = await llm(sys, user);
+    const arr = JSON.parse((out.match(/\[[\s\S]*\]/) || ["[]"])[0]);
+    const list = $("aiList");
+    list.innerHTML = "";
+    for (const it of arr) {
+      const r = rows[it.i];
+      if (!r) continue;
+      suggestions[it.i] = it.reply;
+      const el = document.createElement("div");
+      el.className = "ai-item";
+      el.innerHTML = `<div class="c"><b>@${escapeHtml(r.author || "")}</b>: ${escapeHtml((r.text || "").slice(0, 160))}</div>`
+        + `<div class="r">↳ ${escapeHtml(it.reply)}</div><div class="row"><button class="link cp">Copy reply</button>`
+        + (r.author ? `<a class="link" target="_blank" href="https://www.instagram.com/${encodeURIComponent(r.author)}/">Profile</a>` : "") + `</div>`;
+      el.querySelector(".cp").addEventListener("click", (e) => { navigator.clipboard.writeText(it.reply); e.target.textContent = "Copied ✓"; });
+      list.appendChild(el);
+    }
+    if (!arr.length) list.textContent = "No replies came back, try again.";
+  } catch (e) {
+    $("aiList").textContent = e.message || String(e);
+  } finally {
+    btn.disabled = false; btn.textContent = "Suggest replies to top comments";
+  }
+}
+async function aiAsk() {
+  const q = $("aiQ").value.trim();
+  if (!q) return;
+  const box = $("aiAns");
+  box.hidden = false; box.textContent = "Thinking…";
+  try {
+    const sample = rows.filter((r) => (r.text || "").trim()).slice(0, 400)
+      .map((r) => `- (${r.likes || 0} likes) ${String(r.text).replace(/\s+/g, " ").slice(0, 200)}`).join("\n");
+    box.textContent = await llm("You analyse social media comments for the account owner. Be concrete and short; quote examples.",
+      `Comments (${rows.length} total, up to 400 shown):\n${sample}\n\nQuestion: ${q}`, 900);
+  } catch (e) {
+    box.textContent = e.message || String(e);
+  }
+}
+
 // --- Account: 1 free export, then Pro ($3/month) ----------------------------
 // Only the licence check talks to hammadi.dev; scraped data never leaves the tab.
 const HD = "https://hammadi.dev";
@@ -582,6 +677,12 @@ function wire() {
   $("dlCsv").addEventListener("click", () => download(buildCsv(), "text/csv;charset=utf-8", "csv"));
   $("dlJson").addEventListener("click", () => download(buildJson(), "application/json", "json"));
   $("dlAllMedia").addEventListener("click", () => rows.forEach((item, i) => downloadMedia(item, i)));
+  $("aiCfgBtn").addEventListener("click", () => { $("aiCfg").hidden = !$("aiCfg").hidden; });
+  $("aiSave").addEventListener("click", aiSave);
+  $("aiSuggest").addEventListener("click", aiSuggest);
+  $("aiAsk").addEventListener("click", aiAsk);
+  $("aiQ").addEventListener("keydown", (e) => { if (e.key === "Enter") aiAsk(); });
+  aiLoad();
   applyMode();
   prefillFromTab();
   loadAccount();

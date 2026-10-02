@@ -60,6 +60,25 @@
       </div>
     </div>
 
+    <div id="ai" class="ai" hidden>
+      <div class="ai-hd"><b>✨ AI replies & chat</b><button id="aiCfgBtn" type="button" class="link">⚙ API key</button></div>
+      <div id="aiCfg" class="ai-cfg" hidden>
+        <select id="aiProv"><option value="openai">OpenAI</option><option value="anthropic">Claude (Anthropic)</option></select>
+        <input id="aiKey" type="password" placeholder="Your API key (stored only in this browser)" autocomplete="off" />
+        <input id="aiModel" type="text" placeholder="Model (optional)" />
+        <input id="aiVoice" type="text" placeholder="Your brand / tone, e.g. friendly skincare brand, link in bio" />
+        <button id="aiSave" type="button" class="btn ghost">Save</button>
+      </div>
+      <button id="aiSuggest" type="button" class="btn">Suggest replies to top comments</button>
+      <div id="aiList" class="ai-list"></div>
+      <div class="ai-chat">
+        <input id="aiQ" type="text" placeholder="Ask about these comments: what do people complain about?" />
+        <button id="aiAsk" type="button" class="btn ghost">Ask</button>
+      </div>
+      <div id="aiAns" class="ai-ans" hidden></div>
+      <p class="ai-note">Replies are suggestions: copy and post them yourself. Auto-posting gets accounts banned.</p>
+    </div>
+
     <div id="mediaResult" class="result" hidden>
       <p class="ok"><strong id="mediaCount">0</strong> <span id="mediaNoun">files</span> found</p>
       <div id="mediaList" class="mgrid"></div>
