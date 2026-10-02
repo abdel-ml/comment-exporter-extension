@@ -74,6 +74,19 @@ const MODES = {
       ["profile", (r) => r.username ? `https://www.instagram.com/${r.username}/` : ""],
     ],
   },
+  suggested: {
+    noun: "suggested accounts",
+    label: "Instagram profile URL or @handle",
+    placeholder: "@nasa",
+    hint: "Accounts Instagram suggests as similar to this profile.",
+    columns: [
+      ["username", (r) => r.username],
+      ["full_name", (r) => r.full_name],
+      ["verified", (r) => r.verified],
+      ["private", (r) => r.private],
+      ["profile", (r) => r.username ? `https://www.instagram.com/${r.username}/` : ""],
+    ],
+  },
   ytsearch: {
     noun: "videos",
     label: "YouTube search",
@@ -171,7 +184,7 @@ async function prefillFromTab(keepMode) {
     if (!hit) return;
     if (keepMode) {
       // Same page, other export: reuse the URL when it fits the chosen mode.
-      const postLike = ["comments", "likers", "media"].includes(mode), profLike = ["posts", "followers", "following"].includes(mode);
+      const postLike = ["comments", "likers", "media"].includes(mode), profLike = ["posts", "followers", "following", "suggested"].includes(mode);
       if ((postLike && /\/(p|reel|reels|tv)\//.test(hit.value)) || (profLike && hit.mode === "posts") || (mode === hit.mode)) $("target").value = hit.value;
       else if (profLike && /instagram\.com/.test(tab.url)) {
         const owner = document.querySelector("#target").value;
@@ -414,6 +427,19 @@ async function igxScrape(mode, value, limit) {
       const rows = (d.users || []).slice(0, limit).map((u) => ({ username: u.username, full_name: u.full_name,
         verified: !!u.is_verified, private: !!u.is_private }));
       return { rows, owner: code };
+    }
+
+    if (mode === "suggested") {
+      const m = String(value).match(/instagram\.com\/([^/?#]+)/) || String(value).match(/@?([\w.]+)/);
+      const username = m && m[1].replace(/^@/, "");
+      if (!username) return { error: "Enter a profile URL or @handle." };
+      const found = await api(`/web/search/topsearch/?query=${encodeURIComponent(username)}&context=blended`);
+      const hit = (found.users || []).map((x) => x.user).find((u) => (u.username || "").toLowerCase() === username.toLowerCase());
+      if (!hit) return { error: "Profile not found." };
+      const d = await api(`/api/v1/discover/chaining/?target_id=${hit.pk || hit.id}`);
+      const rows = (d.users || []).slice(0, limit).map((u) => ({ username: u.username, full_name: u.full_name,
+        verified: !!u.is_verified, private: !!u.is_private }));
+      return { rows, owner: username + "-suggested" };
     }
 
     if (mode === "followers" || mode === "following") {
@@ -663,7 +689,9 @@ async function markUsed() {
 // --- Wire up ---------------------------------------------------------------
 
 function wire() {
-  if (new URLSearchParams(location.search).get("inpage")) document.documentElement.classList.add("inpage");
+  const qp = new URLSearchParams(location.search);
+  if (qp.get("inpage")) document.documentElement.classList.add("inpage");
+  if (qp.get("mode") && MODES[qp.get("mode")]) { mode = qp.get("mode"); }
   $("modeSel").addEventListener("change", () => {
     mode = $("modeSel").value;
     if (mode === "ytsearch") setSite("youtube");
