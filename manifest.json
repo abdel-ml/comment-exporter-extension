@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Instagram & YouTube Comment Exporter",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Export all comments of any Instagram post/reel or YouTube video, all posts of an Instagram profile, or a post's photos & videos to CSV/JSON. Runs in your own tab - nothing goes through a server.",
   "author": "hammadi.dev",
   "homepage_url": "https://hammadi.dev",
@@ -25,5 +25,35 @@
     "https://www.youtube.com/*",
     "https://m.youtube.com/*",
     "https://hammadi.dev/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.instagram.com/*",
+        "https://www.youtube.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "popup.html",
+        "popup.css",
+        "popup.js",
+        "platforms.js",
+        "icons/*"
+      ],
+      "matches": [
+        "https://www.instagram.com/*",
+        "https://www.youtube.com/*"
+      ]
+    }
   ]
 }

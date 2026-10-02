@@ -472,6 +472,7 @@ async function markUsed() {
 // --- Wire up ---------------------------------------------------------------
 
 function wire() {
+  if (new URLSearchParams(location.search).get("inpage")) document.documentElement.classList.add("inpage");
   document.querySelectorAll(".tab").forEach((t) => {
     t.addEventListener("click", () => {
       if (t.dataset.mode === mode) return;
