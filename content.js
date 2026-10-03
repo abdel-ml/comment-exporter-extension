@@ -366,3 +366,97 @@
     }
   });
 })();
+
+// --- Video controls on reels/posts: speed, -5s/+5s, loop ----------------------
+(function () {
+  if (!/instagram\.com$/.test(location.hostname)) return;
+  const SPEEDS = [1, 1.25, 1.5, 2, 0.5];
+  const bar = document.createElement("div");
+  bar.className = "igx-vc";
+  bar.innerHTML = '<button data-a="back" title="Back 5s">−5s</button><button data-a="speed" title="Speed">1×</button>'
+    + '<button data-a="fwd" title="Forward 5s">+5s</button><button data-a="loop" title="Loop">🔁</button>';
+  let vid = null;
+  function mostVisible() {
+    let best = null, area = 0;
+    for (const v of document.querySelectorAll("video")) {
+      const r = v.getBoundingClientRect();
+      const a = Math.max(0, Math.min(r.right, innerWidth) - Math.max(r.left, 0)) * Math.max(0, Math.min(r.bottom, innerHeight) - Math.max(r.top, 0));
+      if (a > area && r.width > 150) { area = a; best = v; }
+    }
+    return best;
+  }
+  function sync() {
+    if (!document.body.contains(bar)) document.body.appendChild(bar);
+    vid = mostVisible();
+    if (!vid) { bar.style.display = "none"; return; }
+    const r = vid.getBoundingClientRect();
+    bar.style.display = "flex";
+    bar.style.top = Math.max(8, r.top + 10) + "px";
+    bar.style.left = (r.left + r.width / 2) + "px";
+    bar.querySelector('[data-a="speed"]').textContent = (vid.playbackRate || 1) + "×";
+    bar.querySelector('[data-a="loop"]').classList.toggle("on", !!vid.loop && vid.dataset.igxLoop === "1");
+  }
+  bar.addEventListener("click", (e) => {
+    const a = e.target.closest("button") && e.target.closest("button").dataset.a;
+    if (!a || !vid) return;
+    e.preventDefault(); e.stopPropagation();
+    if (a === "speed") vid.playbackRate = SPEEDS[(SPEEDS.indexOf(vid.playbackRate) + 1) % SPEEDS.length] || 1;
+    if (a === "back") vid.currentTime = Math.max(0, vid.currentTime - 5);
+    if (a === "fwd") vid.currentTime = Math.min(vid.duration || 1e9, vid.currentTime + 5);
+    if (a === "loop") { const on = vid.dataset.igxLoop !== "1"; vid.dataset.igxLoop = on ? "1" : "0"; vid.loop = on; }
+    sync();
+  }, true);
+  setInterval(sync, 700);
+  addEventListener("scroll", sync, { passive: true });
+})();
+
+// --- Quick DM replies: saved replies + AI draft (user's own key) --------------
+(function () {
+  if (!/instagram\.com$/.test(location.hostname)) return;
+  const DEFAULTS = ["Thanks so much! 💕", "Here's the link: ", "Yes, we ship worldwide! 🌍", "Let me check and get back to you shortly."];
+  function composer() { return document.querySelector("div[contenteditable='true'][role='textbox']"); }
+  function insert(text) {
+    const c = composer();
+    if (!c) return;
+    c.focus();
+    document.execCommand("insertText", false, text);
+  }
+  function lastMessages() {
+    const rows = [...document.querySelectorAll("div[role='row']")].slice(-12);
+    return rows.map((r) => (r.innerText || "").replace(/\s+/g, " ").trim()).filter(Boolean).join("\n").slice(-2500);
+  }
+  async function build(box) {
+    const st = await chrome.storage.local.get("igxReplies");
+    const replies = st.igxReplies || DEFAULTS;
+    box.innerHTML = replies.map((r, i) => `<button data-i="${i}" title="${r.replace(/"/g, "&quot;")}">${r.length > 22 ? r.slice(0, 22) + "…" : r}</button>`).join("")
+      + '<button data-a="ai" class="ai">✨ AI draft</button><button data-a="edit" class="ed" title="Edit saved replies">✎</button>';
+    box.onclick = async (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      e.preventDefault();
+      if (b.dataset.i !== undefined) insert(replies[+b.dataset.i]);
+      if (b.dataset.a === "edit") {
+        const v = prompt("Saved replies, one per line:", replies.join("\n"));
+        if (v !== null) { await chrome.storage.local.set({ igxReplies: v.split("\n").map((x) => x.trim()).filter(Boolean) }); build(box); }
+      }
+      if (b.dataset.a === "ai") {
+        b.textContent = "✨ writing…";
+        const res = await chrome.runtime.sendMessage({ igxAiDraft: { conversation: lastMessages() } }).catch(() => null);
+        b.textContent = "✨ AI draft";
+        if (res && res.text) insert(res.text);
+        else alert((res && res.error) || "Add your OpenAI or Claude key in the Comment Exporter panel (⚙ API key) first.");
+      }
+    };
+  }
+  function place() {
+    if (!/\/direct\/t\//.test(location.pathname)) { document.querySelectorAll(".igx-qr").forEach((e) => e.remove()); return; }
+    const c = composer();
+    if (!c || document.querySelector(".igx-qr")) return;
+    const host = c.closest("form") || c.parentElement.parentElement;
+    const box = document.createElement("div");
+    box.className = "igx-qr";
+    host.parentElement.insertBefore(box, host);
+    build(box);
+  }
+  setInterval(place, 1000);
+})();

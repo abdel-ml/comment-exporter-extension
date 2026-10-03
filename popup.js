@@ -74,6 +74,26 @@ const MODES = {
       ["profile", (r) => r.username ? `https://www.instagram.com/${r.username}/` : ""],
     ],
   },
+  hashtag: {
+    noun: "posts",
+    label: "Hashtag",
+    placeholder: "#lipgloss",
+    hint: "Top posts and reels of a hashtag, with likes, comments and views.",
+    columns: [
+      ["url", (r) => r.url], ["type", (r) => r.type], ["author", (r) => r.author], ["posted_at", (r) => toIso(r.taken_at)],
+      ["likes", (r) => r.likes], ["comments", (r) => r.comments], ["views", (r) => r.views], ["caption", (r) => r.caption],
+    ],
+  },
+  unfollowers: {
+    noun: "accounts",
+    label: "Your account",
+    placeholder: "(uses the Instagram account you're logged in with)",
+    hint: "Who doesn't follow you back, and who unfollowed you since your last check. Your own account only.",
+    columns: [
+      ["username", (r) => r.username], ["full_name", (r) => r.full_name], ["status", (r) => r.status],
+      ["verified", (r) => r.verified], ["profile", (r) => r.username ? `https://www.instagram.com/${r.username}/` : ""],
+    ],
+  },
   suggested: {
     noun: "suggested accounts",
     label: "Instagram profile URL or @handle",
@@ -187,6 +207,8 @@ async function prefillFromTab(keepMode) {
     if (!hit) return;
     if (keepMode) {
       // Same page, other export: reuse the URL when it fits the chosen mode.
+      if (mode === "unfollowers") { $("target").value = "me"; return; }
+      if (mode === "hashtag") { const t = (tab.url.match(/\/explore\/tags\/([^/?#]+)/) || [])[1]; if (t) $("target").value = "#" + t; return; }
       const postLike = ["comments", "likers", "media"].includes(mode), profLike = ["posts", "followers", "following", "suggested"].includes(mode);
       if ((postLike && /\/(p|reel|reels|tv)\//.test(hit.value)) || (profLike && hit.mode === "posts") || (mode === hit.mode)) $("target").value = hit.value;
       else if (profLike && /instagram\.com/.test(tab.url)) {
@@ -232,6 +254,7 @@ chrome.runtime.onMessage.addListener((msg) => {
 
 async function run() {
   const m = MODES[mode];
+  if (mode === "unfollowers") $("target").value = "me";
   const value = $("target").value.trim();
   if (!value) {
     setStatus(`Enter ${mode === "posts" ? "a profile URL or @handle" : "a post or reel URL"}.`, "err");
@@ -283,6 +306,21 @@ async function run() {
     }
     rows = out.rows || [];
     if (out.owner) handleForName = out.owner;
+    if (mode === "unfollowers" && out.followers) {
+      // compare with the follower list saved at the last check -> who unfollowed since
+      const key = "igxFollowersSnapshot";
+      const prev = ((await chrome.storage.local.get(key))[key]) || null;
+      const now = new Set(out.followers.map((u) => u.username));
+      if (prev && Array.isArray(prev.list)) {
+        const gone = prev.list.filter((u) => !now.has(u.username));
+        rows = gone.map((u) => ({ ...u, status: `unfollowed you (since ${new Date(prev.at).toLocaleDateString()})` })).concat(rows);
+        out.note = `${gone.length} unfollowed you since your last check · ` + (out.note || "");
+      } else {
+        out.note = "First check saved. Next time we'll also show who unfollowed you. " + (out.note || "");
+      }
+      await chrome.storage.local.set({ [key]: { at: Date.now(), list: out.followers } });
+      if (!rows.length) { $("status").hidden = false; setStatus("🎉 Everyone you follow follows you back. " + (out.note || "")); return; }
+    }
     if (rows.length) markUsed();
     if (!rows.length) {
       setStatus("No " + m.noun + " found. The account may be private, or the post has none.", "err");
@@ -436,6 +474,66 @@ async function igxScrape(mode, value, limit) {
       const rows = (d.users || []).slice(0, limit).map((u) => ({ username: u.username, full_name: u.full_name,
         verified: !!u.is_verified, private: !!u.is_private }));
       return { rows, owner: code };
+    }
+
+    if (mode === "hashtag") {
+      const tag = String(value).replace(/^.*\/tags\//, "").replace(/[#\s/]/g, "").toLowerCase();
+      if (!tag) return { error: "Enter a hashtag." };
+      const info = await api(`/api/v1/tags/web_info/?tag_name=${encodeURIComponent(tag)}`);
+      const total = (info.data && info.data.media_count) || info.count || 0;
+      const rows = [], seen = new Set();
+      let maxId = null, page = 0;
+      const take = (obj) => {
+        (function walk(o) {
+          if (!o || typeof o !== "object") return;
+          const m = o.media && o.media.code ? o.media : (o.code && o.taken_at ? o : null);
+          if (m && !seen.has(m.code)) {
+            seen.add(m.code);
+            rows.push({ url: `https://www.instagram.com/${m.product_type === "clips" ? "reel" : "p"}/${m.code}/`,
+              type: m.product_type === "clips" ? "reel" : m.media_type === 8 ? "carousel" : m.media_type === 2 ? "video" : "photo",
+              author: m.user && m.user.username, taken_at: m.taken_at, likes: m.like_count, comments: m.comment_count,
+              views: m.play_count || m.view_count || "", caption: m.caption && m.caption.text });
+          }
+          for (const k in o) if (k !== "media") walk(o[k]);
+        })(obj);
+      };
+      for (let guard = 0; guard < 30 && rows.length < limit; guard++) {
+        const body = new URLSearchParams({ tab: "top", surface: "grid", ...(maxId ? { max_id: maxId, page: String(page) } : {}) });
+        const r = await fetch(`https://www.instagram.com/api/v1/tags/${encodeURIComponent(tag)}/sections/`, { method: "POST", credentials: "include", body,
+          headers: { "x-ig-app-id": APP_ID, "x-csrftoken": csrf, "x-requested-with": "XMLHttpRequest", "content-type": "application/x-www-form-urlencoded" } });
+        if (!r.ok) break;
+        const d = await r.json();
+        take(d.sections);
+        progress(rows.length, Math.min(limit, total || limit), `${rows.length.toLocaleString()} posts for #${tag}…`);
+        if (!d.more_available || !d.next_max_id) break;
+        maxId = d.next_max_id; page = d.next_page || page + 1;
+        await pace();
+      }
+      return { rows: rows.slice(0, limit), owner: "tag-" + tag, note: total ? `#${tag} has ${Number(total).toLocaleString()} posts in total; these are its top posts.` : "" };
+    }
+
+    if (mode === "unfollowers") {
+      const uid = (document.cookie.match(/(?:^|; )ds_user_id=([^;]+)/) || [])[1];
+      async function all(kind) {
+        const out = [];
+        let maxId = null, guard = 0;
+        do {
+          const q = "count=100" + (kind === "followers" ? "&search_surface=follow_list_page" : "") + (maxId ? `&max_id=${encodeURIComponent(maxId)}` : "");
+          const d = await api(`/api/v1/friendships/${uid}/${kind}/?${q}`);
+          for (const u of d.users || []) out.push(u);
+          progress(out.length, 0, `Reading your ${kind}: ${out.length.toLocaleString()}…`);
+          maxId = d.next_max_id || null;
+          if (maxId) await pace();
+        } while (maxId && ++guard < 300);
+        return out;
+      }
+      const following = await all("following");
+      const followers = await all("followers");
+      const fset = new Set(followers.map((u) => u.username));
+      const rows = following.filter((u) => !fset.has(u.username))
+        .map((u) => ({ username: u.username, full_name: u.full_name, verified: !!u.is_verified, status: "doesn't follow you back" }));
+      return { rows, owner: "me", followers: followers.map((u) => ({ username: u.username, full_name: u.full_name, verified: !!u.is_verified })),
+               note: `You follow ${following.length.toLocaleString()} accounts and have ${followers.length.toLocaleString()} followers.` };
     }
 
     if (mode === "suggested") {
