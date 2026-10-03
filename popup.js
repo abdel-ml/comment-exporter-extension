@@ -862,6 +862,22 @@ async function igxContext(url) {
       .map((a) => (a.getAttribute("href").match(/\/(?:p|reel)\/([A-Za-z0-9_-]+)/) || [])[1]).filter(Boolean))].slice(0, 9);
     const posts = [];
     for (const cd of codes) { try { const it = ((await api(`/api/v1/media/${pk(cd)}/info/`)).items || [])[0]; if (it) posts.push(post(it)); } catch (_) {} await sleep(600); }
+    // Fallback when the info endpoint is refused: the profile page's own meta
+    // description ("1.2M Followers, 300 Following, 900 Posts - ...").
+    const num = (x) => { if (!x) return null; const m = String(x).replace(/,/g, "").match(/([\d.]+)\s*([KkMm]?)/); if (!m) return null;
+      return Math.round(parseFloat(m[1]) * (m[2].toLowerCase() === "m" ? 1e6 : m[2].toLowerCase() === "k" ? 1e3 : 1)); };
+    if (!info.follower_count) {
+      try {
+        const html = await (await fetch(`https://www.instagram.com/${username}/`, { credentials: "include" })).text();
+        const meta = (html.match(/<meta[^>]+name="description"[^>]+content="([^"]+)"/) || html.match(/<meta[^>]+property="og:description"[^>]+content="([^"]+)"/) || [])[1] || "";
+        const d = meta.replace(/&#064;/g, "@").replace(/&amp;/g, "&");
+        info.follower_count = num((d.match(/([\d.,]+\s*[KkMm]?)\s+Followers/) || [])[1]);
+        info.following_count = num((d.match(/([\d.,]+\s*[KkMm]?)\s+Following/) || [])[1]);
+        info.media_count = num((d.match(/([\d.,]+\s*[KkMm]?)\s+Posts/) || [])[1]);
+        const bio = (html.match(/"biography":"((?:[^"\\]|\\.)*)"/) || [])[1];
+        if (bio) info.biography = JSON.parse(`"${bio}"`);
+      } catch (_) {}
+    }
     const followers = info.follower_count || hit.follower_count || null;
     const avgEng = posts.length && followers ? (posts.reduce((a, p) => a + (p.likes || 0) + (p.comments || 0), 0) / posts.length / followers * 100).toFixed(2) + "%" : null;
     return { kind: "Instagram profile", label: "@" + username, summary: { username, full_name: info.full_name || hit.full_name, bio: info.biography || "",
