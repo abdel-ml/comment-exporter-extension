@@ -5,6 +5,13 @@
 // Requests are paced (about one per second) to stay gentle on the account.
 
 const MODES = {
+  influencers: {
+    noun: "influencers",
+    label: "Find influencers",
+    placeholder: "",
+    hint: "Search our influencer database by niche, country and size. Pay only for the list you want.",
+    columns: [],
+  },
   comments: {
     noun: "comments",
     label: "Post or reel URL",
@@ -171,6 +178,12 @@ function applyMode() {
   $("modeSel").value = mode;
   $("countRow").hidden = (!!m.isMedia && mode !== "dlprofile") || mode === "yttranscript" || mode === "unfollowers";
   $("dlOpts").hidden = mode !== "dlprofile";
+  const inf = mode === "influencers";
+  $("infBox").hidden = !inf;
+  $("target").closest("label").hidden = inf;
+  $("run").hidden = inf;
+  if (inf) { $("countRow").hidden = true; infQuote(); }
+  else $("run").hidden = false;
   $("run").textContent = mode === "dlprofile" ? "Find everything to download" : m.isMedia ? "Get photos & videos" : "Export";
   $("result").hidden = true;
   $("mediaResult").hidden = true;
@@ -211,7 +224,7 @@ async function findInstagramTab(want) {
 
 function setSite(s) {
   site = s;
-  for (const o of $("modeSel").options) o.hidden = s === "youtube" ? !["comments", "ytsearch", "yttranscript"].includes(o.value) : ["ytsearch", "yttranscript"].includes(o.value);
+  for (const o of $("modeSel").options) o.hidden = s === "youtube" ? !["comments", "ytsearch", "yttranscript", "influencers"].includes(o.value) : ["ytsearch", "yttranscript"].includes(o.value);
   if (s === "youtube") {
     if (!["comments", "ytsearch", "yttranscript"].includes(mode)) mode = "comments";
     MODES.comments.placeholder = "https://www.youtube.com/watch?v=...";
@@ -812,6 +825,41 @@ function renderMedia(items) {
   $("mediaResult").hidden = false;
 }
 
+// --- Influencer search (hammadi.dev database) ----------------------------------
+let infTimer, infSeq = 0;
+const infFilters = () => ({ q: $("infQ").value.trim(), platform: $("infPlat").value, country: $("infCountry").value,
+  min_followers: $("infMin").value, max_followers: $("infMax").value });
+const fmtK = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "K" : String(n || 0);
+async function infQuote() {
+  const my = ++infSeq;
+  $("infTotal").textContent = "Searching…";
+  try {
+    const r = await hd("/public/v1/influencer-order/quote", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(infFilters()) });
+    const d = await r.json();
+    if (my !== infSeq) return;
+    const total = d.total || 0;
+    $("infTotal").innerHTML = total ? `<b>${total.toLocaleString()}</b> influencers match` : "Nothing matches yet. Try a broader niche or another country.";
+    $("infList").innerHTML = (d.preview || []).map((x) => `<div class="ai-item"><b>@${escapeHtml(x.username)}</b> <span class="c">· ${fmtK(x.followers)} followers${x.country ? " · " + escapeHtml(x.country) : ""}${x.engagement_rate ? " · " + (Number(x.engagement_rate) < 1 ? (Number(x.engagement_rate) * 100).toFixed(1) + "%" : escapeHtml(String(x.engagement_rate))) + " engagement" : ""}</span></div>`).join("");
+    const sizes = [];
+    for (const t of d.tiers || []) {
+      if (t.count <= total) sizes.push({ count: t.count, cents: t.price_cents });
+      else { if (total > 0 && !sizes.some((x) => x.count === total)) sizes.push({ count: total, cents: t.price_cents, all: true }); break; }
+    }
+    $("infBuy").innerHTML = sizes.map((x) => `<button data-n="${x.count}"><b>$${(x.cents / 100).toFixed(x.cents % 100 ? 2 : 0)}</b>${x.all ? "All " : ""}${x.count.toLocaleString()} influencers</button>`).join("");
+    $("infBuy").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => infBuy(Number(b.dataset.n), b)));
+  } catch (_) { if (my === infSeq) $("infTotal").textContent = "Couldn't reach hammadi.dev. Try again."; }
+}
+async function infBuy(n, btn) {
+  btn.disabled = true;
+  try {
+    const r = await hd("/public/v1/influencer-order", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...infFilters(), count: n }) });
+    const d = await r.json();
+    if (!r.ok || !d.url) throw new Error((d.detail && (d.detail.error || d.detail)) || "Checkout failed.");
+    chrome.tabs.create({ url: d.url });
+  } catch (e) { $("infTotal").textContent = String(e.message || e); }
+  finally { btn.disabled = false; }
+}
+
 // --- Search inside comments (Instagram has none) ------------------------------
 let srchTimer;
 async function doSearch() {
@@ -1325,6 +1373,7 @@ function wire() {
   $("colorBtn").addEventListener("click", toggleColor);
   $("srchQ").addEventListener("input", () => { clearTimeout(srchTimer); srchTimer = setTimeout(doSearch, $("srchSmart").checked ? 600 : 150); });
   $("srchSmart").addEventListener("change", doSearch);
+  ["infQ", "infPlat", "infCountry", "infMin", "infMax"].forEach((id) => $(id).addEventListener(id === "infQ" ? "input" : "change", () => { clearTimeout(infTimer); infTimer = setTimeout(infQuote, 400); }));
   $("chatAsk").addEventListener("click", chatAsk);
   $("chatQ").addEventListener("keydown", (e) => { if (e.key === "Enter") chatAsk(); });
   $("chatCfg").addEventListener("click", () => { $("ai").hidden = false; $("aiCfg").hidden = false; $("ai").scrollIntoView({ behavior: "smooth" }); });

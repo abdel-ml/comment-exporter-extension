@@ -28,6 +28,7 @@
   <div class="modebar">
     <label for="modeSel">Export</label>
     <select id="modeSel">
+      <option value="influencers">🔍 Find influencers (our database)</option>
       <option value="comments">Comments</option>
       <option value="posts">Posts of a profile</option>
       <option value="likers">Likers of a post</option>
@@ -61,6 +62,22 @@
         <option value="5000">5,000</option>
       </select>
     </label>
+
+    <div id="infBox" class="inf" hidden>
+      <input id="infQ" type="text" placeholder="Niche: skincare, fitness, vegan food…" />
+      <div class="inf-row">
+        <select id="infPlat"><option value="instagram">Instagram</option><option value="tiktok">TikTok</option><option value="youtube">YouTube</option></select>
+        <select id="infCountry"><option value="">Any country</option><option value="US">🇺🇸 United States</option><option value="GB">🇬🇧 United Kingdom</option><option value="CA">🇨🇦 Canada</option><option value="AU">🇦🇺 Australia</option><option value="DE">🇩🇪 Germany</option><option value="FR">🇫🇷 France</option><option value="ES">🇪🇸 Spain</option><option value="IT">🇮🇹 Italy</option><option value="BR">🇧🇷 Brazil</option><option value="MX">🇲🇽 Mexico</option><option value="IN">🇮🇳 India</option><option value="AE">🇦🇪 UAE</option><option value="SA">🇸🇦 Saudi Arabia</option><option value="MA">🇲🇦 Morocco</option><option value="NL">🇳🇱 Netherlands</option></select>
+      </div>
+      <div class="inf-row">
+        <select id="infMin"><option value="1000">1K+ followers</option><option value="10000">10K+</option><option value="50000">50K+</option><option value="100000">100K+</option><option value="1000000">1M+</option></select>
+        <select id="infMax"><option value="">No max</option><option value="10000">up to 10K</option><option value="50000">up to 50K</option><option value="100000">up to 100K</option><option value="1000000">up to 1M</option></select>
+      </div>
+      <p id="infTotal" class="inf-total"></p>
+      <div id="infList" class="ai-list"></div>
+      <div id="infBuy" class="inf-buy"></div>
+      <p class="chat-sub">From our influencer database. You get an Excel file by email (username, followers, engagement, country, public contact when available).</p>
+    </div>
 
     <div id="dlOpts" class="dl-opts" hidden>
       <label><input type="checkbox" id="dlPosts" checked> 🖼 Posts &amp; reels</label>
