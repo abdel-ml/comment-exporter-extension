@@ -48,3 +48,6 @@ html.igx-ig #igx-panel{bottom:22px}
 .igx-qr{display:flex;flex-wrap:wrap;gap:6px;padding:6px 12px}
 .igx-qr button{border:1px solid #e3d6de;background:#fff;border-radius:999px;padding:5px 10px;font:600 12px/1.2 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;cursor:pointer;color:#262626}
 .igx-qr button:hover{border-color:#dd2a7b}.igx-qr .ai{color:#fff;border:0;background:linear-gradient(135deg,#f58529,#dd2a7b 55%,#8134af)}.igx-qr .ed{padding:5px 8px}
+.igx-inline-wrap{gap:8px}
+.igx-dlall{background:#262626!important;background-image:none!important}
+.igx-inline-wrap .igx-dlall{margin-left:8px}

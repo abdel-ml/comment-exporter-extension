@@ -36,6 +36,8 @@
       <option value="suggested">Suggested (similar) accounts</option>
       <option value="hashtag">Hashtag top posts</option>
       <option value="unfollowers">My unfollowers / not following back</option>
+      <option value="dlprofile">⬇ Download a whole profile</option>
+      <option value="dllinks">⬇ Download from a list of links</option>
       <option value="media">Photos &amp; videos</option>
       <option value="ytsearch">YouTube search results</option>
     </select>
@@ -58,6 +60,13 @@
         <option value="5000">5,000</option>
       </select>
     </label>
+
+    <div id="dlOpts" class="dl-opts" hidden>
+      <label><input type="checkbox" id="dlPosts" checked> 🖼 Posts &amp; reels</label>
+      <label><input type="checkbox" id="dlStories" checked> ⭕ Stories</label>
+      <label><input type="checkbox" id="dlHl" checked> 🔖 Highlights</label>
+      <label class="new"><input type="checkbox" id="dlNew"> ✨ Only new since my last download</label>
+    </div>
 
     <button id="run" class="go">Export</button>
     <button id="colorBtn" type="button" class="btn ghost" style="width:100%;margin-top:8px">🎨 Color comments on the page</button>
@@ -135,8 +144,10 @@
 
     <div id="mediaResult" class="result" hidden>
       <p class="ok"><strong id="mediaCount">0</strong> <span id="mediaNoun">files</span> found</p>
-      <div id="mediaList" class="mgrid"></div>
+      <div id="dlKinds" class="dl-kinds" hidden></div>
+      <div id="dlBar" class="dl-bar" hidden><div class="dl-track"><div id="dlBarFill" class="dl-fill"></div></div><p id="dlBarTx"></p></div>
       <button id="dlAllMedia" class="btn" hidden>Download all</button>
+      <div id="mediaList" class="mgrid"></div>
     </div>
   </main>
 

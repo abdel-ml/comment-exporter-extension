@@ -37,3 +37,24 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
   })();
   return true;
 });
+
+// Bulk downloads (whole profile / list of links): queued here so they keep going
+// when the panel closes. Files land in Downloads/instagram/<user>/<kind>/.
+let bulkBusy = false;
+chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
+  if (!msg || !msg.igxBulk || bulkBusy) return;
+  bulkBusy = true;
+  const items = msg.igxBulk.items || [];
+  (async () => {
+    let failed = 0;
+    for (const [i, it] of items.entries()) {
+      const ok = await new Promise((res) => chrome.downloads.download({ url: it.url, filename: it.filename, conflictAction: "uniquify" },
+        (id) => res(!!id && !chrome.runtime.lastError)));
+      if (!ok) failed++;
+      chrome.runtime.sendMessage({ igxBulkProgress: { n: i + 1, total: items.length, failed } }).catch(() => {});
+      await new Promise((r) => setTimeout(r, 350));
+    }
+    bulkBusy = false;
+  })();
+  reply({ ok: true });
+});

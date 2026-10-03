@@ -117,6 +117,20 @@ const MODES = {
       ["duration", (r) => r.duration], ["url", (r) => r.url], ["channel_url", (r) => r.channel_url], ["description", (r) => r.description],
     ],
   },
+  dlprofile: {
+    noun: "files",
+    label: "Instagram profile URL or @handle",
+    placeholder: "https://www.instagram.com/nasa/  or  @nasa",
+    hint: "Download a whole profile: posts, reels, stories and highlights, into a folder.",
+    isMedia: true,
+  },
+  dllinks: {
+    noun: "files",
+    label: "Post / reel links (paste as many as you want)",
+    placeholder: "https://www.instagram.com/p/…  https://www.instagram.com/reel/…",
+    hint: "Paste many links at once (spaces, commas or new lines). Every photo and video gets downloaded.",
+    isMedia: true,
+  },
   media: {
     noun: "media files",
     label: "Post or reel URL",
@@ -148,8 +162,9 @@ function applyMode() {
   $("inputHint").textContent = m.hint;
   $("rowNoun").textContent = m.noun;
   $("modeSel").value = mode;
-  $("countRow").hidden = !!m.isMedia;
-  $("run").textContent = m.isMedia ? "Get photos & videos" : "Export";
+  $("countRow").hidden = !!m.isMedia && mode !== "dlprofile";
+  $("dlOpts").hidden = mode !== "dlprofile";
+  $("run").textContent = mode === "dlprofile" ? "Find everything to download" : m.isMedia ? "Get photos & videos" : "Export";
   $("result").hidden = true;
   $("mediaResult").hidden = true;
   $("status").hidden = true;
@@ -208,6 +223,8 @@ async function prefillFromTab(keepMode) {
     if (keepMode) {
       // Same page, other export: reuse the URL when it fits the chosen mode.
       if (mode === "unfollowers") { $("target").value = "me"; return; }
+      if (mode === "dllinks") return;
+      if (mode === "dlprofile") { const u = (tab.url.match(/instagram\.com\/([^/?#]+)\/?(?:[?#]|$)/) || [])[1]; if (u && !/^(p|reel|reels|explore|direct|stories|accounts)$/.test(u)) $("target").value = "@" + u; return; }
       if (mode === "hashtag") { const t = (tab.url.match(/\/explore\/tags\/([^/?#]+)/) || [])[1]; if (t) $("target").value = "#" + t; return; }
       const postLike = ["comments", "likers", "media"].includes(mode), profLike = ["posts", "followers", "following", "suggested"].includes(mode);
       if ((postLike && /\/(p|reel|reels|tv)\//.test(hit.value)) || (profLike && hit.mode === "posts") || (mode === hit.mode)) $("target").value = hit.value;
@@ -286,7 +303,7 @@ async function run() {
     const [res] = await chrome.scripting.executeScript(site === "youtube"
       ? (mode === "ytsearch" ? { target: { tabId: igTabId }, func: ytxSearch, args: [count] }
                              : { target: { tabId: igTabId }, func: ytxComments, args: [count] })
-      : { target: { tabId: igTabId }, func: igxScrape, args: [mode, value, count] });
+      : { target: { tabId: igTabId }, func: igxScrape, args: [mode, value, count, dlOptions()] });
     let out = res && res.result;
     if (out && out.navigate) {
       setStatus("Opening the profile in your Instagram tab…", "run");
@@ -297,7 +314,7 @@ async function run() {
         setTimeout(resolve, 20000);
       });
       await new Promise((r) => setTimeout(r, 3000));
-      const [res2] = await chrome.scripting.executeScript({ target: { tabId: igTabId }, func: igxScrape, args: [mode, value, count] });
+      const [res2] = await chrome.scripting.executeScript({ target: { tabId: igTabId }, func: igxScrape, args: [mode, value, count, dlOptions()] });
       out = res2 && res2.result;
     }
     if (!out || out.error) {
@@ -321,13 +338,21 @@ async function run() {
       await chrome.storage.local.set({ [key]: { at: Date.now(), list: out.followers } });
       if (!rows.length) { $("status").hidden = false; setStatus("🎉 Everyone you follow follows you back. " + (out.note || "")); return; }
     }
+    if (mode === "dlprofile" && $("dlNew").checked) {
+      const key = "igxDl_" + (out.owner || "").toLowerCase();
+      const done = new Set(((await chrome.storage.local.get(key))[key]) || []);
+      const before = rows.length;
+      rows = rows.filter((r) => !done.has(r.key));
+      out.note = `${(before - rows.length).toLocaleString()} already downloaded before, ${rows.length.toLocaleString()} new.`;
+      if (!rows.length) { setStatus("✅ Nothing new since your last download of @" + out.owner + "."); return; }
+    }
     if (rows.length) markUsed();
     if (!rows.length) {
       setStatus("No " + m.noun + " found. The account may be private, or the post has none.", "err");
       return;
     }
     $("status").hidden = true;
-    if (m.isMedia) renderMedia(rows);
+    if (m.isMedia) { renderMedia(rows); if (out.note) { $("status").hidden = false; setStatus(out.note); } }
     else {
       $("rowCount").textContent = rows.length.toLocaleString();
       $("result").hidden = false;
@@ -352,7 +377,7 @@ async function run() {
 // Runs INSIDE the Instagram tab (content-script world, same origin as the
 // site, so the user's own session is used). Must be self-contained.
 // ---------------------------------------------------------------------------
-async function igxScrape(mode, value, limit) {
+async function igxScrape(mode, value, limit, opts) {
   const APP_ID = "936619743392459";
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const pace = () => sleep(800 + Math.random() * 700);
@@ -570,6 +595,95 @@ async function igxScrape(mode, value, limit) {
       return { rows: rows.slice(0, limit), owner: username };
     }
 
+    // one post -> list of downloadable files
+    const filesOf = (it, user, kind) => {
+      const day = it.taken_at ? new Date(it.taken_at * 1000).toISOString().slice(0, 10) : "";
+      return (it.carousel_media || [it]).map((p, i, arr) => {
+        const video = (p.video_versions || [])[0];
+        const img = ((p.image_versions2 || {}).candidates || [])[0];
+        const id = it.code || String(it.pk || it.id || "").split("_")[0];
+        const ext = video ? "mp4" : "jpg";
+        return { is_video: !!video, url: video ? video.url : img && img.url, thumb: img && img.url, kind,
+          key: `${kind}:${id}:${i}`, name: `${user}/${kind}/${day}_${id}${arr.length > 1 ? "_" + (i + 1) : ""}.${ext}` };
+      }).filter((x) => x.url);
+    };
+
+    if (mode === "dllinks") {
+      const codes = [...new Set((String(value).match(/\/(?:p|reel|reels|tv)\/[A-Za-z0-9_-]+/g) || []).map(codeOf))];
+      if (!codes.length) return { error: "Paste one or more post / reel links." };
+      const rows = [];
+      for (const [n, code] of codes.entries()) {
+        try {
+          const it = ((await api(`/api/v1/media/${shortcodeToPk(code)}/info/`)).items || [])[0];
+          if (it) rows.push(...filesOf(it, (it.user && it.user.username) || "links", it.product_type === "clips" ? "reels" : "posts"));
+        } catch (e) { if (/rate-limiting/.test(e.message)) break; }
+        progress(n + 1, codes.length, `Link ${n + 1} of ${codes.length}…`);
+        if (n < codes.length - 1) await pace();
+      }
+      return { rows, owner: "links" };
+    }
+
+    if (mode === "dlprofile") {
+      const m = String(value).match(/instagram\.com\/([^/?#]+)/) || String(value).match(/@?([\w.]+)/);
+      const username = m && m[1].replace(/^@/, "");
+      if (!username) return { error: "Enter a profile URL or @handle." };
+      const onProfile = location.pathname.toLowerCase().replace(/\/+$/, "").split("/")[1] === username.toLowerCase();
+      if (!onProfile) return { navigate: `https://www.instagram.com/${username}/` };
+      const o = opts || { posts: true, stories: true, highlights: true };
+      const rows = [];
+      const found = await api(`/web/search/topsearch/?query=${encodeURIComponent(username)}&context=blended`);
+      const hit = (found.users || []).map((x) => x.user).find((u) => (u.username || "").toLowerCase() === username.toLowerCase());
+      const uid = hit && (hit.pk || hit.id);
+      const hlIds = [...new Set([...document.querySelectorAll('a[href*="/stories/highlights/"]')]
+        .map((a) => (a.getAttribute("href").match(/highlights\/(\d+)/) || [])[1]).filter(Boolean))];
+      if (o.stories && uid) {
+        progress(0, 0, "Reading stories…");
+        const d = await api(`/api/v1/feed/reels_media/?reel_ids=${uid}`);
+        for (const reel of d.reels_media || []) for (const it of reel.items || []) rows.push(...filesOf(it, username, "stories"));
+        await pace();
+      }
+      if (o.highlights && hlIds.length) {
+        for (let i = 0; i < hlIds.length; i += 5) {
+          const q = hlIds.slice(i, i + 5).map((h) => "reel_ids=highlight:" + h).join("&");
+          const d = await api(`/api/v1/feed/reels_media/?${q}`);
+          for (const reel of Object.values(d.reels || {}).concat(d.reels_media || [])) {
+            for (const it of reel.items || []) {
+              const f = filesOf(it, username, "highlights");
+              for (const x of f) if (!rows.some((r) => r.key === x.key)) rows.push(x);
+            }
+          }
+          progress(Math.min(i + 5, hlIds.length), hlIds.length, `Highlights ${Math.min(i + 5, hlIds.length)} of ${hlIds.length}…`);
+          await pace();
+        }
+      }
+      if (o.posts) {
+        const codes = [], seen = new Set();
+        let idle = 0;
+        while (codes.length < limit && idle < 5) {
+          const before = codes.length;
+          for (const a of document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]')) {
+            const c = codeOf(a.getAttribute("href"));
+            if (c && !seen.has(c)) { seen.add(c); codes.push(c); }
+          }
+          progress(Math.min(codes.length, limit), limit, `Found ${Math.min(codes.length, limit).toLocaleString()} posts & reels…`);
+          idle = codes.length === before ? idle + 1 : 0;
+          window.scrollTo(0, document.body.scrollHeight);
+          await sleep(1300);
+        }
+        window.scrollTo(0, 0);
+        const pick = codes.slice(0, limit);
+        for (const [n, code] of pick.entries()) {
+          try {
+            const it = ((await api(`/api/v1/media/${shortcodeToPk(code)}/info/`)).items || [])[0];
+            if (it) rows.push(...filesOf(it, username, it.product_type === "clips" ? "reels" : "posts"));
+          } catch (e) { if (/rate-limiting/.test(e.message)) { if (rows.length) break; throw e; } }
+          progress(n + 1, pick.length, `Post ${n + 1} of ${pick.length} · ${rows.length.toLocaleString()} files…`);
+          await pace();
+        }
+      }
+      return { rows, owner: username };
+    }
+
     // media
     const code = codeOf(value);
     if (!code) return { error: "That doesn't look like a post or reel link." };
@@ -621,13 +735,46 @@ function download(text, type, ext) {
 
 function downloadMedia(item, i) {
   if (!item || !item.url) return;
-  chrome.downloads.download({ url: item.url, filename: `instagram-${handleForName}-${i + 1}.${item.is_video ? "mp4" : "jpg"}` });
+  chrome.downloads.download({ url: item.url, conflictAction: "uniquify",
+    filename: item.name ? `instagram/${item.name}` : `instagram-${handleForName}-${i + 1}.${item.is_video ? "mp4" : "jpg"}` });
 }
+
+function dlOptions() {
+  return { posts: $("dlPosts").checked, stories: $("dlStories").checked, highlights: $("dlHl").checked };
+}
+
+// Bulk download runs in the background worker, so it keeps going if the panel is closed.
+async function downloadAll() {
+  const items = rows.filter((r) => r.url).map((r, i) => ({ url: r.url,
+    filename: r.name ? `instagram/${r.name}` : `instagram-${handleForName}-${i + 1}.${r.is_video ? "mp4" : "jpg"}` }));
+  $("dlAllMedia").disabled = true;
+  chrome.runtime.sendMessage({ igxBulk: { items } });
+  if (mode === "dlprofile") {
+    const key = "igxDl_" + handleForName.toLowerCase();
+    const done = ((await chrome.storage.local.get(key))[key]) || [];
+    await chrome.storage.local.set({ [key]: [...new Set(done.concat(rows.map((r) => r.key).filter(Boolean)))].slice(-20000) });
+  }
+}
+chrome.runtime.onMessage.addListener((msg) => {
+  if (!msg || !msg.igxBulkProgress) return;
+  const { n, total, failed } = msg.igxBulkProgress;
+  $("dlBar").hidden = false;
+  $("dlBarFill").style.width = Math.round((n / total) * 100) + "%";
+  $("dlBarTx").textContent = n >= total ? `✅ Downloaded ${total - failed} of ${total} files to Downloads/instagram/` : `Downloading ${n} / ${total}…`;
+  if (n >= total) $("dlAllMedia").disabled = false;
+});
 
 function renderMedia(items) {
   const list = $("mediaList");
   list.innerHTML = "";
-  items.forEach((item, i) => {
+  const kinds = {};
+  items.forEach((it) => { kinds[it.kind || "files"] = (kinds[it.kind || "files"] || 0) + 1; });
+  $("dlKinds").innerHTML = Object.entries(kinds).map(([k, n]) =>
+    `<span><b>${n.toLocaleString()}</b> ${k}</span>`).join("");
+  $("dlKinds").hidden = Object.keys(kinds).length < 2 && !items[0].kind;
+  $("dlBar").hidden = true;
+  $("dlAllMedia").textContent = items.length > 1 ? `⬇ Download all ${items.length.toLocaleString()} files` : "Download";
+  items.slice(0, 60).forEach((item, i) => {
     const cell = document.createElement("div");
     cell.className = "mcell";
     cell.innerHTML =
@@ -640,6 +787,7 @@ function renderMedia(items) {
   $("mediaCount").textContent = items.length.toLocaleString();
   $("mediaNoun").textContent = items.length === 1 ? "file" : "files";
   $("dlAllMedia").hidden = items.length < 2;
+  if (items.length > 60) list.insertAdjacentHTML("beforeend", `<p class="chat-sub" style="grid-column:1/-1">Showing 60 of ${items.length.toLocaleString()}. "Download all" saves every file.</p>`);
   $("mediaResult").hidden = false;
 }
 
@@ -1146,7 +1294,7 @@ function wire() {
   $("target").addEventListener("keydown", (e) => { if (e.key === "Enter") run(); });
   $("dlCsv").addEventListener("click", () => download(buildCsv(), "text/csv;charset=utf-8", "csv"));
   $("dlJson").addEventListener("click", () => download(buildJson(), "application/json", "json"));
-  $("dlAllMedia").addEventListener("click", () => rows.forEach((item, i) => downloadMedia(item, i)));
+  $("dlAllMedia").addEventListener("click", downloadAll);
   ["gwTags", "gwKw", "gwUnique", "gwOwner"].forEach((id) => $(id).addEventListener(id === "gwKw" ? "input" : "change", gwUpdatePool));
   $("gwGo").addEventListener("click", gwPick);
   document.querySelectorAll(".auth-tabs button").forEach((b) => b.addEventListener("click", () => setAuthMode(b.dataset.a)));
@@ -1164,7 +1312,7 @@ function wire() {
   $("aiQ").addEventListener("keydown", (e) => { if (e.key === "Enter") aiAsk(); });
   aiLoad();
   applyMode();
-  prefillFromTab();
+  prefillFromTab(!!(qp.get("mode") && MODES[qp.get("mode")]));
   loadAccount();
 }
 

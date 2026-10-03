@@ -58,13 +58,20 @@
     b.innerHTML = ICON + "<span>Export profile</span>";
     b.title = "Export this profile's posts, followers or following";
     b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); toggle(true, "posts"); });
+    const d = document.createElement("button");
+    d.type = "button";
+    d.className = "igx-inline igx-dlall";
+    d.innerHTML = ICON + "<span>Download all</span>";
+    d.title = "Download every post, reel, story and highlight of this profile";
+    d.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); toggle(true, "dlprofile"); });
     if (row && row.parentElement) {
       const wrap = document.createElement("div");
       wrap.className = "igx-inline-wrap";
       wrap.appendChild(b);
+      wrap.appendChild(d);
       row.parentElement.insertBefore(wrap, row.nextSibling);
     } else {
-      header.appendChild(b);
+      header.appendChild(b); header.appendChild(d);
     }
   }
   // "Suggested for you" on a profile: an Export button next to "See all".
