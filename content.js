@@ -107,3 +107,84 @@
     else if (isProfile()) { placeInline(); placeSuggested(); }
   }, 800);
 })();
+
+// --- Sentiment colors on the page ------------------------------------------
+// The panel asks for it ("Color comments"); every visible comment gets a
+// green / grey / red edge and 🛒 / ❓ tags, and new ones are colored as you scroll.
+(function () {
+  const POS = /\b(love|loved|amazing|awesome|beautiful|gorgeous|great|perfect|best|cute|obsessed|wow|incredible|fantastic|nice|good|stunning|fire|queen|thank|thanks|excellent|happy|favorite|favourite|adorable|wonderful|bonito|bonita|hermos[oa]|me encanta|precios[oa]|genial|gracias|lind[oa]|magnifique|super|j'adore|merci|maravilhos[oa]|amei|perfeito|schön|toll|bellissim[oa]|harika|güzel)\b/i;
+  const NEG = /\b(hate|bad|worst|ugly|terrible|awful|scam|fake|disappointed|overpriced|expensive|broken|boring|trash|horrible|cringe|gross|refund|poor|malo|feo|caro|estafa|nul|arnaque|décevant|ruim|horrível|schlecht|teuer|kötü|pahalı)\b/i;
+  const POS_E = /[😍❤🥰😘💕💖💗💯🔥👏🙌✨😊😁🤩💪👍😻💜💙💚🧡🤍💛🫶]/u, NEG_E = /[😡🤬👎🤮😒💔😤🙄😞😢😭🤢]/u;
+  const BUY = /\b(price|how much|cost|link|where (can|do|to) (i |we )?(buy|get|order|find)|i (want|need) (this|it|one)|take my money|ship|shipping|deliver|available|in stock|restock|discount|code|cu[aá]nto|precio|d[oó]nde|lo quiero|prix|combien|o[uù] acheter|quanto|onde compr|wie viel|wo kaufen)\b/i;
+  let on = false, obs = null;
+  const COL = { positive: "#16a34a", neutral: "#a1a1aa", negative: "#dc2626" };
+  function classify(t) {
+    const p = (POS.test(t) ? 1 : 0) + (POS_E.test(t) ? 1 : 0), n = (NEG.test(t) ? 1.2 : 0) + (NEG_E.test(t) ? 1.5 : 0);
+    return p > n ? "positive" : n > p ? "negative" : "neutral";
+  }
+  function targets() {
+    if (/youtube\.com$/.test(location.hostname)) return [...document.querySelectorAll("#content-text")].map((el) => ({ text: el, box: el.closest("#body") || el.parentElement }));
+    // Instagram: every comment block has a "Reply" button; climb from it to the
+    // block (the child of the long comments list) and take its comment text span.
+    const out = [], seen = new Set();
+    const replies = [...document.querySelectorAll("span, div[role='button']")]
+      .filter((x) => x.childElementCount === 0 && /^(Reply|Responder|Répondre|Antworten|Rispondi|Yanıtla)$/.test((x.textContent || "").trim()));
+    for (const r of replies) {
+      let blk = r;
+      while (blk.parentElement && blk.parentElement.childElementCount < 6) blk = blk.parentElement;
+      if (!blk || seen.has(blk)) continue;
+      seen.add(blk);
+      const spans = [...blk.querySelectorAll("span[dir='auto']")].filter((x) => !x.closest("a")
+        && !/^(Reply|See translation|View replies.*|Hide replies|\d+[smhdw]|\d+ likes?|Edited|•)$/i.test((x.textContent || "").trim()));
+      const t = spans.sort((a, b) => (b.textContent || "").length - (a.textContent || "").length)[0];
+      if (t && (t.textContent || "").trim()) out.push({ text: t, box: blk });
+    }
+    return out;
+  }
+  function paint() {
+    let n = 0, c = { positive: 0, neutral: 0, negative: 0 }, buyers = 0;
+    for (const { text, box } of targets()) {
+      if (!box || box.dataset.igxS) continue;
+      const t = text.textContent || "";
+      const s = classify(t);
+      box.dataset.igxS = s;
+      box.style.boxShadow = `inset 4px 0 0 ${COL[s]}`;
+      box.style.background = s === "positive" ? "rgba(22,163,74,.07)" : s === "negative" ? "rgba(220,38,38,.08)" : "";
+      box.style.borderRadius = "8px";
+      const tags = [];
+      if (BUY.test(t)) { tags.push("🛒 Buyer"); buyers++; }
+      if (t.includes("?")) tags.push("❓ Question");
+      tags.push(s === "positive" ? "😊 Positive" : s === "negative" ? "😠 Negative" : "😐 Neutral");
+      const tg = document.createElement("span");
+      tg.className = "igx-tags";
+      tg.innerHTML = tags.map((x) => `<i class="igx-tag igx-${x.includes("Buyer") ? "buy" : x.includes("Question") ? "q" : s}">${x}</i>`).join("");
+      text.parentElement.insertBefore(tg, text.nextSibling);
+      c[s]++; n++;
+    }
+    return { n, c, buyers };
+  }
+  function start() {
+    on = true;
+    const r = paint();
+    if (!obs) {
+      obs = new MutationObserver(() => { if (on) paint(); });
+      obs.observe(document.body, { childList: true, subtree: true });
+    }
+    return r;
+  }
+  function stop() {
+    on = false;
+    document.querySelectorAll("[data-igx-s]").forEach((b) => { b.style.boxShadow = ""; b.style.background = ""; delete b.dataset.igxS; });
+    document.querySelectorAll(".igx-tags").forEach((t) => t.remove());
+  }
+  chrome.runtime.onMessage.addListener((msg, _s, reply) => {
+    if (msg && msg.igxColor !== undefined) {
+      if (msg.igxColor) {
+        start();
+        const all = [...document.querySelectorAll("[data-igx-s]")].map((b) => b.dataset.igxS);
+        reply({ ok: true, total: all.length, positive: all.filter((x) => x === "positive").length,
+                negative: all.filter((x) => x === "negative").length, buyers: document.querySelectorAll(".igx-buy").length });
+      } else { stop(); reply({ ok: true }); }
+    }
+  });
+})();

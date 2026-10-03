@@ -757,6 +757,23 @@ async function aiAsk() {
   }
 }
 
+// --- Sentiment colors on the page (content.js does the painting) -------------
+let colored = false;
+async function toggleColor() {
+  const tab = await findInstagramTab();
+  if (!tab) { setStatus("Open an Instagram post/reel or a YouTube video first.", "err"); return; }
+  colored = !colored;
+  try {
+    const r = await chrome.tabs.sendMessage(tab.id, { igxColor: colored });
+    $("colorBtn").textContent = colored ? "✓ Colors on (click to remove)" : "🎨 Color comments on the page";
+    $("colorRes").hidden = !colored;
+    if (colored && r) $("colorRes").textContent = `${r.total} comments colored so far: ${r.positive} positive · ${r.negative} negative · ${r.buyers} buyers. Scroll the comments, new ones get colored too.`;
+  } catch (_) {
+    colored = false;
+    setStatus("Reload the Instagram/YouTube page once, then try again.", "err");
+  }
+}
+
 // --- AI chat about the open page ----------------------------------------------
 let chatCtx = null, chatUrl = "", chatMsgs = [];
 function chatAdd(cls, text) {
@@ -979,6 +996,7 @@ function wire() {
   $("gwGo").addEventListener("click", gwPick);
   document.querySelectorAll(".auth-tabs button").forEach((b) => b.addEventListener("click", () => setAuthMode(b.dataset.a)));
   $("authBox").addEventListener("submit", doAuth);
+  $("colorBtn").addEventListener("click", toggleColor);
   $("chatAsk").addEventListener("click", chatAsk);
   $("chatQ").addEventListener("keydown", (e) => { if (e.key === "Enter") chatAsk(); });
   $("chatCfg").addEventListener("click", () => { $("ai").hidden = false; $("aiCfg").hidden = false; $("ai").scrollIntoView({ behavior: "smooth" }); });
