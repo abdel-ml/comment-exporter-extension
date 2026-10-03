@@ -188,3 +188,84 @@
     }
   });
 })();
+
+// --- Giveaway reveal on the page ---------------------------------------------
+// After the panel draws a winner: the comments scroll fast with flashing colors,
+// slow down, and stop on the winner's comment with a golden spotlight + confetti.
+(function () {
+  const COLORS = ["#f58529", "#dd2a7b", "#8134af", "#16a34a", "#2563eb", "#eab308"];
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  function scroller() {
+    if (/youtube\.com$/.test(location.hostname)) return document.scrollingElement;
+    const els = [...document.querySelectorAll("div")].filter((e) => e.scrollHeight > e.clientHeight + 80
+      && /auto|scroll/.test(getComputedStyle(e).overflowY) && e.clientHeight > 200);
+    return els.find((e) => e.querySelector("span[dir='auto']")) || document.scrollingElement;
+  }
+  function blocks() {
+    if (/youtube\.com$/.test(location.hostname)) return [...document.querySelectorAll("ytd-comment-thread-renderer, ytd-comment-view-model")];
+    const out = new Set();
+    for (const r of document.querySelectorAll("span, div[role='button']")) {
+      if (r.childElementCount === 0 && /^(Reply|Responder|Répondre|Antworten|Rispondi|Yanıtla)$/.test((r.textContent || "").trim())) {
+        let b = r;
+        while (b.parentElement && b.parentElement.childElementCount < 6) b = b.parentElement;
+        out.add(b);
+      }
+    }
+    return [...out];
+  }
+  function userOf(b) {
+    // the avatar link comes first and has no text: take the first link that does
+    const sel = /youtube/.test(location.hostname) ? "#author-text" : "a[href^='/']";
+    const t = [...b.querySelectorAll(sel)].map((a) => (a.textContent || "").trim()).find((x) => x);
+    return (t || "").replace(/^@/, "").toLowerCase();
+  }
+  function loadMore() {
+    const btn = [...document.querySelectorAll("svg[aria-label], button")].find((e) =>
+      /Load more comments|View more comments/i.test(e.getAttribute("aria-label") || e.textContent || ""));
+    if (btn) (btn.closest("button,[role=button]") || btn).click();
+  }
+  function confetti(x, y) {
+    for (let i = 0; i < 90; i++) {
+      const p = document.createElement("i");
+      p.className = "igx-confetti";
+      p.style.cssText = `left:${x}px;top:${y}px;background:${COLORS[i % COLORS.length]};`
+        + `--dx:${(Math.random() - 0.5) * 520}px;--dy:${-140 - Math.random() * 320}px;--r:${Math.random() * 720}deg;animation-delay:${Math.random() * 0.15}s`;
+      document.body.appendChild(p);
+      setTimeout(() => p.remove(), 2600);
+    }
+  }
+  async function reveal(winner) {
+    const sc = scroller();
+    const want = (winner || "").toLowerCase().replace(/^@/, "");
+    let speed = 40, found = null;
+    // spin: scroll down flashing random comments, then slow down
+    for (let step = 0; step < 70 && !found; step++) {
+      const bs = blocks();
+      bs.forEach((b) => { b.style.transition = "background .12s, box-shadow .12s"; b.style.background = ""; b.style.boxShadow = ""; });
+      const pick = bs[Math.floor(Math.random() * bs.length)];
+      if (pick) { const c = COLORS[step % COLORS.length]; pick.style.background = c + "22"; pick.style.boxShadow = `inset 4px 0 0 ${c}`; }
+      if (step > 25) found = bs.find((b) => userOf(b) === want);
+      if (!found) { sc.scrollTop += 90; await sleep(speed); speed = Math.min(260, speed * 1.045); }
+    }
+    // keep scrolling until the winner's comment is loaded (it may be further down)
+    for (let i = 0; i < 160 && !found; i++) {
+      sc.scrollTop += 400; if (i % 3 === 0) loadMore();
+      await sleep(350); found = blocks().find((b) => userOf(b) === want);
+    }
+    blocks().forEach((b) => { b.style.background = ""; b.style.boxShadow = ""; });
+    if (!found) return false;
+    found.scrollIntoView({ behavior: "smooth", block: "center" });
+    await sleep(700);
+    found.classList.add("igx-winner");
+    const badge = document.createElement("div");
+    badge.className = "igx-winner-badge";
+    badge.textContent = "🏆 WINNER";
+    found.prepend(badge);
+    const r = found.getBoundingClientRect();
+    confetti(r.left + r.width / 2, r.top + 20);
+    return true;
+  }
+  chrome.runtime.onMessage.addListener((msg, _s, reply) => {
+    if (msg && msg.igxReveal) { reveal(msg.igxReveal).then((ok) => reply({ ok })); return true; }
+  });
+})();

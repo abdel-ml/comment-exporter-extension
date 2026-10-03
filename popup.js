@@ -623,6 +623,11 @@ async function gwPick() {
   const winners = [];
   for (let i = 0; i < want; i++) winners.push(pool.splice(randInt(pool.length), 1)[0]);
   roll.hidden = true;
+  // Reveal the (first) winner right inside the comments on the page.
+  try {
+    const tab = await findInstagramTab();
+    if (tab) chrome.tabs.sendMessage(tab.id, { igxReveal: winners[0].author }).catch(() => {});
+  } catch (_) {}
   const stamp = new Date().toLocaleString();
   const res = $("gwRes");
   res.innerHTML = winners.map((w, i) => `<div class="gw-win"><b>${want > 1 ? "#" + (i + 1) + " " : "🏆 "}@${escapeHtml(w.author)}</b>`

@@ -25,3 +25,10 @@ html.igx-ig #igx-panel{bottom:22px}
 .igx-tag{font:600 11px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-style:normal;padding:0 7px;border-radius:999px;color:#fff;white-space:nowrap}
 .igx-positive{background:#16a34a}.igx-neutral{background:#a1a1aa}.igx-negative{background:#dc2626}
 .igx-buy{background:linear-gradient(135deg,#f58529,#dd2a7b)}.igx-q{background:#2563eb}
+.igx-winner{position:relative;border-radius:12px!important;background:linear-gradient(135deg,rgba(250,204,21,.25),rgba(245,133,41,.18))!important;
+  box-shadow:0 0 0 3px #facc15,0 10px 30px rgba(234,179,8,.45)!important;animation:igxpulse 1.2s ease-in-out 3}
+.igx-winner-badge{display:inline-block;margin:2px 0 6px;padding:3px 10px;border-radius:999px;color:#fff;font:800 12px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  background:linear-gradient(135deg,#f58529,#dd2a7b 55%,#8134af);box-shadow:0 4px 14px rgba(221,42,123,.4)}
+@keyframes igxpulse{0%,100%{transform:scale(1)}50%{transform:scale(1.025)}}
+.igx-confetti{position:fixed;width:9px;height:14px;border-radius:2px;z-index:2147483647;pointer-events:none;animation:igxconf 2.4s cubic-bezier(.2,.7,.3,1) forwards}
+@keyframes igxconf{0%{transform:translate(0,0) rotate(0);opacity:1}70%{opacity:1}100%{transform:translate(var(--dx),calc(var(--dy) + 520px)) rotate(var(--r));opacity:0}}
