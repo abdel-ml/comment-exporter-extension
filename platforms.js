@@ -151,3 +151,29 @@ async function ytxSearch(limit) {
     return { error: e && e.message ? e.message : String(e) };
   }
 }
+
+// YouTube transcript: opens the video's own "Show transcript" panel (like a
+// person would) and reads the timestamped lines. Runs in the YouTube tab.
+async function ytxTranscript() {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const segs = () => [...document.querySelectorAll("ytd-transcript-segment-renderer, transcript-segment-view-model")];
+  if (!/\/(watch|shorts\/)/.test(location.href)) return { error: "Open a YouTube video first." };
+  if (!segs().length) {
+    const expand = document.querySelector("ytd-watch-metadata #expand, #description-inline-expander #expand, tp-yt-paper-button#expand");
+    if (expand) { expand.click(); await sleep(800); }
+    const btn = document.querySelector("ytd-video-description-transcript-section-renderer button, button[aria-label='Show transcript']");
+    if (!btn) return { error: "This video has no transcript (no captions)." };
+    btn.click();
+    for (let i = 0; i < 40 && !segs().length; i++) await sleep(500);
+  }
+  if (!segs().length) return { error: "YouTube didn't load the transcript. If an ad is playing, wait for it to end and try again." };
+  const toSec = (t) => t.split(":").reduce((a, b) => a * 60 + Number(b), 0);
+  const rows = segs().map((s) => {
+    const t = (s.querySelector(".segment-timestamp, [class*=timestamp]") || {}).textContent || (s.innerText.match(/^\s*(\d+:\d\d(?::\d\d)?)/) || [])[1] || "";
+    let text = ((s.querySelector(".segment-text, yt-formatted-string, [class*=text]") || {}).textContent || s.innerText || "").replace(/\s+/g, " ").trim();
+    text = text.replace(/^\d+:\d\d(?::\d\d)?\s*/, "").replace(/^\d+ (?:seconds?|minutes?|hours?)(?:,? \d+ (?:seconds?|minutes?))*\s*/, "").trim();
+    return { start: t.trim(), seconds: t ? toSec(t.trim()) : "", text };
+  }).filter((r) => r.text);
+  const title = (document.querySelector("ytd-watch-metadata h1, h1.title") || {}).textContent || document.title;
+  return { rows, owner: (new URL(location.href).searchParams.get("v") || "video"), title: title.trim() };
+}

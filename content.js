@@ -91,7 +91,20 @@
     if (seeAll) { b.style.marginRight = "12px"; host.insertBefore(b, seeAll); }
     else host.appendChild(b);
   }
+  // YouTube videos: a "Transcript" pill above the Export button.
+  function placeTranscript() {
+    const on = /youtube\.com\/(watch|shorts\/)/.test(location.href);
+    let t = document.getElementById("igx-tr");
+    if (!on) { if (t) t.remove(); return; }
+    if (t) return;
+    t = document.createElement("button");
+    t.id = "igx-tr"; t.type = "button";
+    t.innerHTML = '<span class="igx-tx">📝 Transcript</span>';
+    t.addEventListener("click", () => toggle(true, "yttranscript"));
+    document.body.appendChild(t);
+  }
   function sync() {
+    placeTranscript();
     const on = supported();
     btn.style.display = on ? "" : "none";
     if (!on) toggle(false);
@@ -464,6 +477,118 @@
     box.className = "igx-qr";
     host.parentElement.insertBefore(box, host);
     build(box);
+  }
+  setInterval(place, 1000);
+})();
+
+// --- Top posts (sort the grid) + creator score card ---------------------------
+(function () {
+  if (!/instagram\.com$/.test(location.hostname)) return;
+  const posts = new Map(), users = new Map();
+  window.addEventListener("message", (e) => {
+    if (e.source !== window || !e.data || e.data.__igx !== "stats") return;
+    for (const p of e.data.posts || []) if (!posts.has(p.code) || p.views) posts.set(p.code, { ...(posts.get(p.code) || {}), ...p });
+    for (const u of e.data.users || []) users.set(u.username.toLowerCase(), u);
+    if (modal && modal.isConnected) render();
+  });
+  const profileUser = () => {
+    const m = location.pathname.match(/^\/([^/]+)\/?(?:reels\/?)?$/);
+    return m && !/^(explore|direct|accounts|stories|reels|p|reel)$/.test(m[1]) ? m[1] : null;
+  };
+  const parseNum = (s) => {
+    const m = String(s || "").replace(/,/g, "").match(/([\d.]+)\s*([KMB])?/i);
+    if (!m) return null;
+    return Math.round(parseFloat(m[1]) * ({ K: 1e3, M: 1e6, B: 1e9 }[(m[2] || "").toUpperCase()] || 1));
+  };
+  function followersOf(user) {
+    const u = users.get(user.toLowerCase());
+    if (u && u.followers) return u.followers;
+    const a = [...document.querySelectorAll("header a, header span, header li")].find((e) => /followers$/i.test((e.textContent || "").trim()));
+    if (a) { const t = a.querySelector("span[title]"); return parseNum(t ? t.getAttribute("title") : a.textContent); }
+    const meta = document.querySelector('meta[property="og:description"], meta[name="description"]');
+    return meta ? parseNum((meta.content.match(/([\d.,]+[KMB]?)\s+Followers/i) || [])[1]) : null;
+  }
+  const fmt = (n) => n == null ? "–" : n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + "K" : String(Math.round(n));
+  const median = (a) => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+
+  let modal = null, sortBy = "likes", loading = false;
+  function stats(user) {
+    const list = [...posts.values()].filter((p) => !p.owner || p.owner.toLowerCase() === user.toLowerCase());
+    const f = followersOf(user);
+    const likes = list.map((p) => p.likes), comments = list.map((p) => p.comments);
+    const avgL = likes.reduce((a, b) => a + b, 0) / (likes.length || 1), avgC = comments.reduce((a, b) => a + b, 0) / (comments.length || 1);
+    const er = f ? (avgL + avgC) / f : null;
+    const times = list.map((p) => p.taken_at).sort((a, b) => b - a);
+    const weeks = times.length > 1 ? (times[0] - times[times.length - 1]) / 604800 : 0;
+    const perWeek = weeks > 0 ? (times.length - 1) / weeks : null;
+    // Rule-of-thumb sponsored-post price: ~$10 per 1K followers at a 2% engagement rate, scaled by engagement.
+    const price = f ? (f / 1000) * 10 * Math.min(2.5, Math.max(0.4, (er || 0.02) / 0.02)) : null;
+    const medL = median(likes);
+    return { list, f, avgL, avgC, er, perWeek, price, medL };
+  }
+  function grade(er) {
+    if (er == null) return ["–", "#999"];
+    if (er >= 0.06) return ["Excellent", "#16a34a"]; if (er >= 0.03) return ["Very good", "#22c55e"];
+    if (er >= 0.01) return ["Average", "#eab308"]; return ["Low", "#ef4444"];
+  }
+  function render() {
+    const user = profileUser();
+    if (!user) return;
+    const s = stats(user);
+    const key = { likes: (p) => p.likes, comments: (p) => p.comments, views: (p) => p.views || 0, engagement: (p) => p.likes + p.comments * 3, newest: (p) => p.taken_at }[sortBy];
+    const sorted = [...s.list].sort((a, b) => key(b) - key(a));
+    const [g, gc] = grade(s.er);
+    modal.querySelector(".igx-tp-body").innerHTML = `
+      <div class="igx-score">
+        <div><b>${fmt(s.f)}</b><span>followers</span></div>
+        <div><b style="color:${gc}">${s.er == null ? "–" : (s.er * 100).toFixed(2) + "%"}</b><span>engagement · ${g}</span></div>
+        <div><b>${fmt(s.avgL)}</b><span>avg likes</span></div>
+        <div><b>${fmt(s.avgC)}</b><span>avg comments</span></div>
+        <div><b>${s.perWeek == null ? "–" : s.perWeek.toFixed(1)}</b><span>posts / week</span></div>
+        <div class="price"><b>${s.price == null ? "–" : "$" + fmt(s.price * 0.7) + "–$" + fmt(s.price * 1.3)}</b><span>est. price per post</span></div>
+      </div>
+      <p class="igx-tp-note">Based on the ${s.list.length} latest posts loaded${loading ? " (loading more…)" : ""}. 🔥 = more than 3× the usual likes (viral).</p>
+      <div class="igx-tp-grid">${sorted.map((p, i) => `
+        <a href="/${p.type === "reel" ? "reel" : "p"}/${p.code}/" target="_blank" class="igx-tp-card">
+          <div class="th" style="background-image:url('${(p.thumb || "").replace(/'/g, "%27")}')"><span class="rk">#${i + 1}</span>${p.likes > 3 * s.medL && s.list.length > 5 ? '<span class="fire">🔥</span>' : ""}<span class="ty">${p.type}</span></div>
+          <div class="st">❤️ ${fmt(p.likes)} · 💬 ${fmt(p.comments)}${p.views ? " · ▶ " + fmt(p.views) : ""}</div>
+          <div class="dt">${new Date(p.taken_at * 1000).toLocaleDateString()}</div>
+        </a>`).join("")}</div>`;
+  }
+  async function loadMore(n) {
+    loading = true; render();
+    const y = scrollY;
+    for (let i = 0; i < n; i++) { window.scrollTo(0, document.body.scrollHeight); await new Promise((r) => setTimeout(r, 1500)); }
+    window.scrollTo(0, y);
+    loading = false; render();
+  }
+  function open() {
+    if (modal) modal.remove();
+    modal = document.createElement("div");
+    modal.className = "igx-tp";
+    modal.innerHTML = `<div class="igx-tp-box"><div class="igx-tp-hd"><b>📊 @${profileUser()} · Top posts & creator score</b>
+      <select class="igx-tp-sort"><option value="likes">Most liked</option><option value="comments">Most commented</option><option value="engagement">Best engagement</option><option value="views">Most viewed (reels)</option><option value="newest">Newest</option></select>
+      <button class="igx-tp-more">Load 24 more</button><button class="igx-tp-x" aria-label="Close">×</button></div><div class="igx-tp-body"></div></div>`;
+    modal.addEventListener("click", (e) => { if (e.target === modal || e.target.closest(".igx-tp-x")) modal.remove(); });
+    modal.querySelector(".igx-tp-sort").value = sortBy;
+    modal.querySelector(".igx-tp-sort").addEventListener("change", (e) => { sortBy = e.target.value; render(); });
+    modal.querySelector(".igx-tp-more").addEventListener("click", () => loadMore(3));
+    document.body.appendChild(modal);
+    render();
+    if (stats(profileUser()).list.length < 24) loadMore(2);
+  }
+  function place() {
+    const user = profileUser();
+    if (!user) return;
+    const anchor = document.querySelector(".igx-dlall");
+    if (!anchor || document.querySelector(".igx-top")) return;
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "igx-inline igx-top";
+    b.innerHTML = "<span>📊 Top posts & score</span>";
+    b.title = "Sort this profile's posts by likes, comments or views, and see its engagement rate and estimated price per post";
+    b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); open(); });
+    anchor.insertAdjacentElement("afterend", b);
   }
   setInterval(place, 1000);
 })();

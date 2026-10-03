@@ -107,6 +107,13 @@ const MODES = {
       ["profile", (r) => r.username ? `https://www.instagram.com/${r.username}/` : ""],
     ],
   },
+  yttranscript: {
+    noun: "lines",
+    label: "YouTube video",
+    placeholder: "https://www.youtube.com/watch?v=...",
+    hint: "Open the video in a YouTube tab. You get every line with its timestamp (TXT, SRT, CSV).",
+    columns: [["start", (r) => r.start], ["seconds", (r) => r.seconds], ["text", (r) => r.text]],
+  },
   ytsearch: {
     noun: "videos",
     label: "YouTube search",
@@ -162,7 +169,7 @@ function applyMode() {
   $("inputHint").textContent = m.hint;
   $("rowNoun").textContent = m.noun;
   $("modeSel").value = mode;
-  $("countRow").hidden = !!m.isMedia && mode !== "dlprofile";
+  $("countRow").hidden = (!!m.isMedia && mode !== "dlprofile") || mode === "yttranscript" || mode === "unfollowers";
   $("dlOpts").hidden = mode !== "dlprofile";
   $("run").textContent = mode === "dlprofile" ? "Find everything to download" : m.isMedia ? "Get photos & videos" : "Export";
   $("result").hidden = true;
@@ -204,9 +211,9 @@ async function findInstagramTab(want) {
 
 function setSite(s) {
   site = s;
-  for (const o of $("modeSel").options) o.hidden = s === "youtube" ? !["comments", "ytsearch"].includes(o.value) : o.value === "ytsearch";
+  for (const o of $("modeSel").options) o.hidden = s === "youtube" ? !["comments", "ytsearch", "yttranscript"].includes(o.value) : ["ytsearch", "yttranscript"].includes(o.value);
   if (s === "youtube") {
-    if (!["comments", "ytsearch"].includes(mode)) mode = "comments";
+    if (!["comments", "ytsearch", "yttranscript"].includes(mode)) mode = "comments";
     MODES.comments.placeholder = "https://www.youtube.com/watch?v=...";
     MODES.comments.label = "YouTube video or Short";
     MODES.comments.hint = "Open the video in a YouTube tab.";
@@ -224,6 +231,7 @@ async function prefillFromTab(keepMode) {
       // Same page, other export: reuse the URL when it fits the chosen mode.
       if (mode === "unfollowers") { $("target").value = "me"; return; }
       if (mode === "dllinks") return;
+      if (mode === "yttranscript") { if (hit.site === "youtube" && hit.mode === "comments") $("target").value = hit.value; return; }
       if (mode === "dlprofile") { const u = (tab.url.match(/instagram\.com\/([^/?#]+)\/?(?:[?#]|$)/) || [])[1]; if (u && !/^(p|reel|reels|explore|direct|stories|accounts)$/.test(u)) $("target").value = "@" + u; return; }
       if (mode === "hashtag") { const t = (tab.url.match(/\/explore\/tags\/([^/?#]+)/) || [])[1]; if (t) $("target").value = "#" + t; return; }
       const postLike = ["comments", "likers", "media"].includes(mode), profLike = ["posts", "followers", "following", "suggested"].includes(mode);
@@ -277,7 +285,7 @@ async function run() {
     setStatus(`Enter ${mode === "posts" ? "a profile URL or @handle" : "a post or reel URL"}.`, "err");
     return;
   }
-  const isYt = mode === "ytsearch" || /youtube\.com|youtu\.be/.test(value);
+  const isYt = mode === "ytsearch" || mode === "yttranscript" || /youtube\.com|youtu\.be/.test(value);
   setSite(isYt ? "youtube" : "instagram");
   const tab = await findInstagramTab(site);
   if (!tab) {
@@ -302,6 +310,7 @@ async function run() {
   try {
     const [res] = await chrome.scripting.executeScript(site === "youtube"
       ? (mode === "ytsearch" ? { target: { tabId: igTabId }, func: ytxSearch, args: [count] }
+         : mode === "yttranscript" ? { target: { tabId: igTabId }, func: ytxTranscript, args: [] }
                              : { target: { tabId: igTabId }, func: ytxComments, args: [count] })
       : { target: { tabId: igTabId }, func: igxScrape, args: [mode, value, count, dlOptions()] });
     let out = res && res.result;
@@ -322,6 +331,7 @@ async function run() {
       return;
     }
     rows = out.rows || [];
+    transcriptTitle = out.title || "";
     if (out.owner) handleForName = out.owner;
     if (mode === "unfollowers" && out.followers) {
       // compare with the follower list saved at the last check -> who unfollowed since
@@ -357,6 +367,7 @@ async function run() {
       $("rowCount").textContent = rows.length.toLocaleString();
       $("result").hidden = false;
       $("ai").hidden = mode !== "comments";
+      $("dlTxt").hidden = $("dlSrt").hidden = mode !== "yttranscript";
       $("gw").hidden = mode !== "comments";
       if (mode === "comments") renderInsights(); else $("ins").hidden = true;
       $("srch").hidden = mode !== "comments"; $("srchQ").value = ""; $("srchList").innerHTML = ""; $("srchN").textContent = "";
@@ -720,6 +731,16 @@ function buildCsv() {
 function buildJson() {
   const cols = MODES[mode].columns;
   return JSON.stringify(rows.map((r) => Object.fromEntries(cols.map((c) => [c[0], c[1](r) ?? null]))), null, 2);
+}
+
+let transcriptTitle = "";
+function buildTxt() {
+  return (transcriptTitle ? transcriptTitle + "\n\n" : "") + rows.map((r) => `[${r.start}] ${r.text}`).join("\n");
+}
+function buildSrt() {
+  const ts = (x) => { const h = Math.floor(x / 3600), m = Math.floor(x % 3600 / 60), s = Math.floor(x % 60);
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")},000`; };
+  return rows.map((r, i) => `${i + 1}\n${ts(r.seconds || 0)} --> ${ts(rows[i + 1] ? rows[i + 1].seconds : (r.seconds || 0) + 4)}\n${r.text}\n`).join("\n");
 }
 
 function download(text, type, ext) {
@@ -1294,6 +1315,8 @@ function wire() {
   $("target").addEventListener("keydown", (e) => { if (e.key === "Enter") run(); });
   $("dlCsv").addEventListener("click", () => download(buildCsv(), "text/csv;charset=utf-8", "csv"));
   $("dlJson").addEventListener("click", () => download(buildJson(), "application/json", "json"));
+  $("dlTxt").addEventListener("click", () => download(buildTxt(), "text/plain;charset=utf-8", "txt"));
+  $("dlSrt").addEventListener("click", () => download(buildSrt(), "text/plain;charset=utf-8", "srt"));
   $("dlAllMedia").addEventListener("click", downloadAll);
   ["gwTags", "gwKw", "gwUnique", "gwOwner"].forEach((id) => $(id).addEventListener(id === "gwKw" ? "input" : "change", gwUpdatePool));
   $("gwGo").addEventListener("click", gwPick);

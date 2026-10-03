@@ -201,3 +201,4 @@ mark{background:#fde68a;color:inherit;border-radius:3px;padding:0 1px}
 .dl-fill{height:100%;width:0;background:linear-gradient(90deg,#f58529,#dd2a7b,#8134af);transition:width .3s}
 .dl-bar p{font-size:12.5px;margin:6px 0 0;color:#555}
 #dlAllMedia{width:100%;margin:0 0 10px}
+[hidden]{display:none!important}
