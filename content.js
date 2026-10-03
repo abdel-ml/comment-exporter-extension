@@ -269,3 +269,71 @@
     if (msg && msg.igxReveal) { reveal(msg.igxReveal).then((ok) => reply({ ok })); return true; }
   });
 })();
+
+// --- "Download reel" button under the post/reel action bar -------------------
+(function () {
+  if (!/instagram\.com$/.test(location.hostname)) return;
+  const ICON = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>';
+  const pk = (code) => { const A = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"; let n = 0n;
+    for (const ch of code.slice(0, 11)) n = n * 64n + BigInt(A.indexOf(ch)); return n.toString(); };
+  function codeNow() { return (location.pathname.match(/\/(?:p|reel|reels|tv)\/([A-Za-z0-9_-]+)/) || [])[1]; }
+  async function download(btn) {
+    const code = codeNow();
+    if (!code) return;
+    const label = btn.querySelector("span");
+    label.textContent = "Preparing…";
+    try {
+      const csrf = (document.cookie.match(/(?:^|; )csrftoken=([^;]+)/) || [])[1] || "";
+      const r = await fetch(`/api/v1/media/${pk(code)}/info/`, { credentials: "include",
+        headers: { "x-ig-app-id": "936619743392459", "x-csrftoken": csrf, "x-requested-with": "XMLHttpRequest" } });
+      const it = ((await r.json()).items || [])[0];
+      if (!it) throw new Error("not found");
+      const owner = (it.user && it.user.username) || "instagram";
+      const parts = it.carousel_media || [it];
+      let i = 0;
+      for (const p of parts) {
+        const v = (p.video_versions || [])[0], img = ((p.image_versions2 || {}).candidates || [])[0];
+        const url = v ? v.url : img && img.url;
+        if (!url) continue;
+        i++;
+        await chrome.runtime.sendMessage({ igxDownload: { url, filename: `instagram-${owner}-${code}${parts.length > 1 ? "-" + i : ""}.${v ? "mp4" : "jpg"}` } });
+      }
+      label.textContent = i > 1 ? `Downloaded ${i} files ✓` : "Downloaded ✓";
+    } catch (_) {
+      label.textContent = "Couldn't download, log in to Instagram";
+    }
+    setTimeout(() => { label.textContent = btn.dataset.label; }, 3500);
+  }
+  function place() {
+    const code = codeNow();
+    const old = document.querySelector(".igx-dl-wrap");
+    if (!code) { if (old) old.remove(); return; }
+    if (old && old.dataset.code === code) return;
+    if (old) old.remove();
+    // The post's own action row: the block holding Like AND Comment (not the sidebar).
+    let bar = null;
+    for (const s of document.querySelectorAll("svg[aria-label='Like'], svg[aria-label='Unlike']")) {
+      if (!s.getBoundingClientRect().width) continue;
+      let e = s.parentElement;
+      for (let i = 0; i < 8 && e; i++, e = e.parentElement) {
+        if (e.querySelector("svg[aria-label='Comment']") && e.querySelector("svg[aria-label='Share'], svg[aria-label='Share Post'], svg[aria-label='Save']")) { bar = e; break; }
+      }
+      if (bar) break;
+    }
+    if (!bar) return;
+    const isVideo = /\/(reel|reels|tv)\//.test(location.pathname) || !!document.querySelector("video");
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "igx-inline igx-dl";
+    b.dataset.code = code;
+    b.dataset.label = isVideo ? "Download reel" : "Download photos";
+    b.innerHTML = ICON + `<span>${b.dataset.label}</span>`;
+    b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); download(b); });
+    const wrap = document.createElement("div");
+    wrap.className = "igx-dl-wrap";
+    wrap.dataset.code = code;
+    wrap.appendChild(b);
+    bar.insertAdjacentElement("afterend", wrap);
+  }
+  setInterval(place, 1000);
+})();

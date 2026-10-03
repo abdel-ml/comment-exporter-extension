@@ -32,3 +32,5 @@ html.igx-ig #igx-panel{bottom:22px}
 @keyframes igxpulse{0%,100%{transform:scale(1)}50%{transform:scale(1.025)}}
 .igx-confetti{position:fixed;width:9px;height:14px;border-radius:2px;z-index:2147483647;pointer-events:none;animation:igxconf 2.4s cubic-bezier(.2,.7,.3,1) forwards}
 @keyframes igxconf{0%{transform:translate(0,0) rotate(0);opacity:1}70%{opacity:1}100%{transform:translate(var(--dx),calc(var(--dy) + 520px)) rotate(var(--r));opacity:0}}
+.igx-dl-wrap{flex-basis:100%;width:100%;display:flex;padding:4px 16px 8px;box-sizing:border-box}
+.igx-dl{height:34px;font-size:13.5px;padding:0 16px}
