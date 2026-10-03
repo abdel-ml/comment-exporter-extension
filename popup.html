@@ -16,6 +16,14 @@
   </header>
 
   <div id="acct" class="acct">Checking your plan…</div>
+  <form id="authBox" class="authbox" hidden>
+    <div class="auth-tabs"><button type="button" data-a="signup" class="on">Create free account</button><button type="button" data-a="login">Log in</button></div>
+    <input id="authEmail" type="email" placeholder="Email" autocomplete="email" required />
+    <input id="authPw" type="password" placeholder="Password (8+ characters)" autocomplete="new-password" minlength="8" required />
+    <button id="authGo" type="submit" class="btn">Create account &amp; get 1 free export</button>
+    <p id="authErr" class="err" hidden></p>
+    <p class="auth-note">Takes 5 seconds. No card needed for the free export.</p>
+  </form>
 
   <div class="modebar">
     <label for="modeSel">Export</label>
@@ -50,6 +58,16 @@
     </label>
 
     <button id="run" class="go">Export</button>
+
+    <div id="chat" class="chat">
+      <div class="ai-hd"><b>🤖 Ask AI about this page</b><button id="chatCfg" type="button" class="link">⚙ API key</button></div>
+      <p class="chat-sub">Opens the profile, reel or video in your tab, reads it, and answers: "Is this profile a fit for my skincare brand?", "Why did this reel go viral?"</p>
+      <div id="chatLog" class="chat-log"></div>
+      <div class="ai-chat">
+        <input id="chatQ" type="text" placeholder="Is this creator a good fit for my brand?" />
+        <button id="chatAsk" type="button" class="btn">Ask</button>
+      </div>
+    </div>
 
     <div id="status" class="status" hidden></div>
 

@@ -174,3 +174,18 @@ html.inpage .hd { padding-right: 46px; }
 .ins-cloud span{color:#8134af;font-weight:700}
 .ins-cloud span:nth-child(3n){color:#dd2a7b}.ins-cloud span:nth-child(3n+1){color:#f58529}
 .ins-emo{font-size:18px;display:flex;flex-wrap:wrap;gap:8px}.ins-emo small{font-size:11px;color:#888}
+
+.chat{margin-top:12px;border:1px solid #e9d5ff;border-radius:12px;padding:10px 12px;background:linear-gradient(135deg,#faf5ff,#fff)}
+.chat-sub{margin:0 0 8px;color:#666;font-size:12px}
+.chat-log{display:grid;gap:6px;max-height:280px;overflow:auto;margin-bottom:6px}
+.msg-u,.msg-a{font-size:12.5px;padding:8px 10px;border-radius:10px;white-space:pre-wrap;line-height:1.45}
+.msg-u{background:#f3e8ff;justify-self:end;max-width:85%}
+.msg-a{background:#fff;border:1px solid #eee}
+.msg-a.ctx{color:#7c3aed;font-size:11.5px;background:none;border:0;padding:2px 0}
+
+.authbox{margin:8px 14px 0;padding:10px 12px;border:1px solid #f0d9e6;border-radius:12px;background:#fff;display:grid;gap:7px}
+.auth-tabs{display:flex;gap:6px}.auth-tabs button{flex:1;border:1px solid #eee;background:#fafafa;border-radius:8px;padding:6px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;color:#555}
+.auth-tabs button.on{background:#fdf2f8;border-color:#e7b7cf;color:#c13584}
+.authbox input{padding:9px 10px;border:1px solid #e3d6de;border-radius:8px;font:inherit;font-size:13px}
+.auth-note{margin:0;color:#888;font-size:11.5px}
+.err{color:#c0392b;font-size:12px;margin:0}

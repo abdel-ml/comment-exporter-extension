@@ -677,14 +677,17 @@ async function aiSave() {
   $("aiCfg").hidden = true;
 }
 async function llm(system, user, maxTokens = 1200) {
-  if (!ai.key) { $("aiCfg").hidden = false; throw new Error("Add your OpenAI or Claude API key first (⚙ API key)."); }
+  return llmChat(system, [{ role: "user", content: user }], maxTokens);
+}
+async function llmChat(system, messages, maxTokens = 1200) {
+  if (!ai.key) { $("aiCfg").hidden = false; $("ai").hidden = false; throw new Error("Add your OpenAI or Claude API key first (⚙ API key)."); }
   const model = ai.model || AI_DEFAULT[ai.prov];
   if (ai.prov === "anthropic") {
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "content-type": "application/json", "x-api-key": ai.key, "anthropic-version": "2023-06-01",
                  "anthropic-dangerous-direct-browser-access": "true" },
-      body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: "user", content: user }] }),
+      body: JSON.stringify({ model, max_tokens: maxTokens, system, messages }),
     });
     const d = await r.json();
     if (!r.ok) throw new Error((d.error && d.error.message) || `Claude error ${r.status}`);
@@ -693,7 +696,7 @@ async function llm(system, user, maxTokens = 1200) {
   const r = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${ai.key}` },
-    body: JSON.stringify({ model, messages: [{ role: "system", content: system }, { role: "user", content: user }] }),
+    body: JSON.stringify({ model, messages: [{ role: "system", content: system }, ...messages] }),
   });
   const d = await r.json();
   if (!r.ok) throw new Error((d.error && d.error.message) || `OpenAI error ${r.status}`);
@@ -754,38 +757,179 @@ async function aiAsk() {
   }
 }
 
+// --- AI chat about the open page ----------------------------------------------
+let chatCtx = null, chatUrl = "", chatMsgs = [];
+function chatAdd(cls, text) {
+  const d = document.createElement("div");
+  d.className = cls; d.textContent = text;
+  $("chatLog").appendChild(d); $("chatLog").scrollTop = $("chatLog").scrollHeight;
+  return d;
+}
+async function chatContext() {
+  const tab = await findInstagramTab();
+  if (!tab) throw new Error("Open an Instagram profile or reel, or a YouTube video, in a tab first.");
+  if (chatCtx && chatUrl === tab.url) return chatCtx;
+  const yt = /youtube\.com/.test(tab.url);
+  const [res] = await chrome.scripting.executeScript(yt
+    ? { target: { tabId: tab.id }, func: ytxComments, args: [120] }
+    : { target: { tabId: tab.id }, func: igxContext, args: [tab.url] });
+  const out = res && res.result;
+  if (!out || out.error) throw new Error((out && out.error) || "Couldn't read this page.");
+  if (yt) {
+    const title = tab.title.replace(/ - YouTube$/, "");
+    out.kind = "youtube video"; out.summary = { title, url: tab.url, channel: out.owner,
+      comments: (out.rows || []).slice(0, 120).map((r) => `(${r.likes} likes) ${String(r.text).slice(0, 200)}`) };
+  }
+  chatCtx = out; chatUrl = tab.url; chatMsgs = [];
+  return out;
+}
+async function chatAsk() {
+  const q = $("chatQ").value.trim();
+  if (!q) return;
+  $("chatQ").value = "";
+  chatAdd("msg-u", q);
+  const wait = chatAdd("msg-a ctx", chatCtx ? "Thinking…" : "Reading the page in your tab…");
+  try {
+    const ctx = await chatContext();
+    if (!chatMsgs.length) wait.textContent = `Read ${ctx.kind}: ${ctx.label || ""}`;
+    else wait.remove();
+    const system = "You are a sharp social media analyst helping a brand or creator. Use ONLY the page data below; quote numbers "
+      + "and real comments; be concrete and brief (max ~180 words); give a clear verdict when asked for a fit or a decision; "
+      + "say what's missing if the data can't answer. " + (ai.voice ? `The user: ${ai.voice}. ` : "")
+      + "\n\nPAGE DATA (" + ctx.kind + "):\n" + JSON.stringify(ctx.summary).slice(0, 14000);
+    chatMsgs.push({ role: "user", content: q });
+    const ans = await llmChat(system, chatMsgs.slice(-10), 900);
+    chatMsgs.push({ role: "assistant", content: ans });
+    chatAdd("msg-a", ans);
+  } catch (e) {
+    wait.textContent = e.message || String(e);
+  }
+}
+
+// Runs in the Instagram tab: everything the chat needs about a profile or a post.
+async function igxContext(url) {
+  const APP_ID = "936619743392459";
+  const csrf = (document.cookie.match(/(?:^|; )csrftoken=([^;]+)/) || [])[1] || "";
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  async function api(path) {
+    const r = await fetch("https://www.instagram.com" + path, { credentials: "include",
+      headers: { "x-ig-app-id": APP_ID, "x-csrftoken": csrf, "x-requested-with": "XMLHttpRequest", "x-asbd-id": "129477" } });
+    if (!r.ok) throw new Error("Instagram returned " + r.status);
+    return r.json();
+  }
+  const pk = (code) => { const A = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"; let n = 0n;
+    for (const ch of code.slice(0, 11)) n = n * 64n + BigInt(A.indexOf(ch)); return n.toString(); };
+  const post = (it) => ({ type: it.product_type === "clips" ? "reel" : it.media_type === 8 ? "carousel" : it.media_type === 2 ? "video" : "photo",
+    date: it.taken_at ? new Date(it.taken_at * 1000).toISOString().slice(0, 10) : "", likes: it.like_count, comments: it.comment_count,
+    views: it.play_count || it.view_count || null, caption: ((it.caption && it.caption.text) || "").slice(0, 300) });
+  try {
+    if (!/(?:^|; )ds_user_id=/.test(document.cookie)) return { error: "Log in to Instagram in this tab first." };
+    const code = (url.match(/\/(?:p|reel|reels|tv)\/([A-Za-z0-9_-]+)/) || [])[1];
+    if (code) {
+      const it = ((await api(`/api/v1/media/${pk(code)}/info/`)).items || [])[0];
+      if (!it) return { error: "Post not found." };
+      const c = await api(`/api/v1/media/${pk(code)}/comments/?can_support_threading=true&permalink_enabled=false`);
+      let comments = (c.comments || []).map((x) => `(${x.comment_like_count || 0} likes) @${x.user && x.user.username}: ${(x.text || "").slice(0, 200)}`);
+      if (c.next_min_id) { await sleep(700); const c2 = await api(`/api/v1/media/${pk(code)}/comments/?can_support_threading=true&min_id=${encodeURIComponent(c.next_min_id)}`);
+        comments = comments.concat((c2.comments || []).map((x) => `(${x.comment_like_count || 0} likes) @${x.user && x.user.username}: ${(x.text || "").slice(0, 200)}`)); }
+      return { kind: "Instagram post/reel", label: "@" + (it.user && it.user.username), summary: { url, owner: it.user && it.user.username, ...post(it), comments: comments.slice(0, 120) } };
+    }
+    const username = (url.match(/instagram\.com\/([^/?#]+)/) || [])[1];
+    if (!username) return { error: "Open a profile, post or reel." };
+    const found = await api(`/web/search/topsearch/?query=${encodeURIComponent(username)}&context=blended`);
+    const hit = (found.users || []).map((x) => x.user).find((u) => (u.username || "").toLowerCase() === username.toLowerCase());
+    if (!hit) return { error: "Profile not found." };
+    let info = {};
+    try { info = (await api(`/api/v1/users/${hit.pk || hit.id}/info/`)).user || {}; } catch (_) {}
+    const codes = [...new Set([...document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]')]
+      .map((a) => (a.getAttribute("href").match(/\/(?:p|reel)\/([A-Za-z0-9_-]+)/) || [])[1]).filter(Boolean))].slice(0, 9);
+    const posts = [];
+    for (const cd of codes) { try { const it = ((await api(`/api/v1/media/${pk(cd)}/info/`)).items || [])[0]; if (it) posts.push(post(it)); } catch (_) {} await sleep(600); }
+    const followers = info.follower_count || hit.follower_count || null;
+    const avgEng = posts.length && followers ? (posts.reduce((a, p) => a + (p.likes || 0) + (p.comments || 0), 0) / posts.length / followers * 100).toFixed(2) + "%" : null;
+    return { kind: "Instagram profile", label: "@" + username, summary: { username, full_name: info.full_name || hit.full_name, bio: info.biography || "",
+      category: info.category || info.category_name || "", followers, following: info.following_count, posts_total: info.media_count,
+      verified: !!(info.is_verified || hit.is_verified), business: !!info.is_business, website: info.external_url || "",
+      avg_engagement_recent: avgEng, recent_posts: posts } };
+  } catch (e) {
+    return { error: e && e.message ? e.message : String(e) };
+  }
+}
+
 // --- Account: 1 free export, then Pro ($3/month) ----------------------------
 // Only the licence check talks to hammadi.dev; scraped data never leaves the tab.
 const HD = "https://hammadi.dev";
 let acct = null;
+let token = "";
+let authMode = "signup";
+
+async function hd(path, opts = {}) {
+  // Session token kept by the extension (sign-up/login happen in the panel); the
+  // hammadi.dev cookie still works as a fallback for people logged in on the site.
+  if (!token) { try { token = (await chrome.storage.local.get("igxToken")).igxToken || ""; } catch (_) {} }
+  const headers = { ...(opts.headers || {}), ...(token ? { authorization: `Bearer ${token}` } : {}) };
+  return fetch(`${HD}${path}`, { ...opts, headers, credentials: "include" });
+}
 
 async function loadAccount() {
   const el = $("acct");
-  try {
-    const r = await fetch(`${HD}/public/v1/ext/status`, { credentials: "include" });
-    acct = await r.json();
-  } catch (_) {
-    acct = null;
-  }
+  try { acct = await (await hd("/public/v1/ext/status")).json(); } catch (_) { acct = null; }
   if (!acct) { el.textContent = "Can't reach hammadi.dev right now."; return; }
+  $("authBox").hidden = true;
   if (!acct.logged_in) {
-    el.innerHTML = `<span>Log in to get <b>1 free export</b></span><a href="${HD}/login?next=/extension" target="_blank" rel="noopener">Log in / sign up →</a>`;
-  } else if (acct.pro) {
-    el.innerHTML = `<span>✓ <b>Pro</b> · unlimited exports</span><span>${escapeHtml(acct.email)}</span>`;
-  } else if (acct.free_left > 0) {
-    el.innerHTML = `<span><b>${acct.free_left} free export</b> left</span><button class="pro" id="goPro">Go Pro · $3/mo</button>`;
-  } else {
-    el.innerHTML = `<span>Free export used</span><button class="pro" id="goPro">Unlimited · $3/month</button>`;
+    el.innerHTML = `<span><b>1 free export</b> with a free account</span><button class="pro" id="showAuth">Create account</button>`;
+    document.getElementById("showAuth").addEventListener("click", () => { $("authBox").hidden = !$("authBox").hidden; $("authEmail").focus(); });
+    return;
   }
+  const out = `<button class="link" id="logout" title="Log out" style="font-size:11px;color:#999">log out</button>`;
+  if (acct.pro) el.innerHTML = `<span>✓ <b>Pro</b> · unlimited · ${escapeHtml(acct.email)}</span>${out}`;
+  else if (acct.free_left > 0) el.innerHTML = `<span><b>${acct.free_left} free export</b> left</span><button class="pro" id="goPro">Go Pro · $3/mo</button>`;
+  else el.innerHTML = `<span>Free export used</span><button class="pro" id="goPro">Unlimited · $3/month</button>`;
   const b = document.getElementById("goPro");
   if (b) b.addEventListener("click", goPro);
+  const lo = document.getElementById("logout");
+  if (lo) lo.addEventListener("click", async () => { token = ""; await chrome.storage.local.remove("igxToken"); loadAccount(); });
+}
+
+function setAuthMode(m) {
+  authMode = m;
+  document.querySelectorAll(".auth-tabs button").forEach((b) => b.classList.toggle("on", b.dataset.a === m));
+  $("authGo").textContent = m === "signup" ? "Create account & get 1 free export" : "Log in";
+  $("authPw").autocomplete = m === "signup" ? "new-password" : "current-password";
+  $("authErr").hidden = true;
+}
+
+async function doAuth(e) {
+  e.preventDefault();
+  const email = $("authEmail").value.trim(), password = $("authPw").value;
+  $("authGo").disabled = true; $("authErr").hidden = true;
+  try {
+    let body;
+    if (authMode === "signup") {
+      const base = (email.split("@")[0] || "user").toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 18) || "user";
+      body = { email, password, username: base + Math.floor(100 + Math.random() * 900) };
+    } else {
+      body = { identifier: email, password };
+    }
+    const r = await fetch(`${HD}/auth/${authMode}`, { method: "POST", credentials: "include",
+      headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.token) throw new Error((typeof d.detail === "string" && d.detail) || (d.detail && d.detail[0] && d.detail[0].msg) || "Couldn't sign you in.");
+    token = d.token;
+    await chrome.storage.local.set({ igxToken: token });
+    await loadAccount();
+  } catch (err) {
+    $("authErr").textContent = err.message || String(err); $("authErr").hidden = false;
+  } finally {
+    $("authGo").disabled = false;
+  }
 }
 
 async function goPro() {
   try {
-    const r = await fetch(`${HD}/public/v1/ext/checkout`, { method: "POST", credentials: "include" });
+    const r = await hd("/public/v1/ext/checkout", { method: "POST" });
     const d = await r.json();
-    if (d.url) chrome.tabs.create({ url: d.url });
+    if (d.url) chrome.tabs.create({ url: d.url });   // straight to Stripe checkout
     else setStatus((d.detail && d.detail.error) || "Log in first.", "err");
   } catch (_) {
     setStatus("Can't reach hammadi.dev right now.", "err");
@@ -798,8 +942,8 @@ async function allowExport() {
   await loadAccount();
   if (!acct) { setStatus("Can't reach hammadi.dev right now.", "err"); return false; }
   if (!acct.logged_in) {
-    setStatus("Log in to hammadi.dev first: your first export is free.", "err");
-    chrome.tabs.create({ url: `${HD}/login?next=/extension` });
+    setStatus("Create a free account above to get your free export (takes 5 seconds).", "err");
+    $("authBox").hidden = false; $("authEmail").focus();
     return false;
   }
   if (acct.pro || acct.free_left > 0) return true;
@@ -808,7 +952,7 @@ async function allowExport() {
 }
 
 async function markUsed() {
-  try { await fetch(`${HD}/public/v1/ext/use`, { method: "POST", credentials: "include" }); } catch (_) {}
+  try { await hd("/public/v1/ext/use", { method: "POST" }); } catch (_) {}
   loadAccount();
 }
 
@@ -833,6 +977,11 @@ function wire() {
   $("dlAllMedia").addEventListener("click", () => rows.forEach((item, i) => downloadMedia(item, i)));
   ["gwTags", "gwKw", "gwUnique", "gwOwner"].forEach((id) => $(id).addEventListener(id === "gwKw" ? "input" : "change", gwUpdatePool));
   $("gwGo").addEventListener("click", gwPick);
+  document.querySelectorAll(".auth-tabs button").forEach((b) => b.addEventListener("click", () => setAuthMode(b.dataset.a)));
+  $("authBox").addEventListener("submit", doAuth);
+  $("chatAsk").addEventListener("click", chatAsk);
+  $("chatQ").addEventListener("keydown", (e) => { if (e.key === "Enter") chatAsk(); });
+  $("chatCfg").addEventListener("click", () => { $("ai").hidden = false; $("aiCfg").hidden = false; $("ai").scrollIntoView({ behavior: "smooth" }); });
   $("aiCfgBtn").addEventListener("click", () => { $("aiCfg").hidden = !$("aiCfg").hidden; });
   $("aiSave").addEventListener("click", aiSave);
   $("aiSuggest").addEventListener("click", aiSuggest);
