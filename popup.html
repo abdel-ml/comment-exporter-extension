@@ -104,6 +104,18 @@
 
     <div id="result" class="result" hidden>
       <p class="ok"><strong id="rowCount">0</strong> <span id="rowNoun">rows</span> ready</p>
+      <div id="rowFilter" class="rowf" hidden>
+        <input id="rfKw" type="search" placeholder="Caption contains… (keyword, #tag, @mention)" />
+        <div class="rowf-row">
+          <select id="rfType"><option value="">All types</option><option value="reel">Reels only</option><option value="video">Videos</option><option value="photo">Photos</option><option value="carousel">Carousels</option></select>
+          <select id="rfSort"><option value="">Sort: original</option><option value="views">Most views</option><option value="likes">Most likes</option><option value="comments">Most comments</option></select>
+        </div>
+        <div class="rowf-row">
+          <input id="rfViews" type="number" min="0" placeholder="Min views" />
+          <input id="rfLikes" type="number" min="0" placeholder="Min likes" />
+        </div>
+        <p id="rfCount" class="chat-sub" style="margin:2px 0 0"></p>
+      </div>
       <div class="dl">
         <button id="dlCsv" class="btn">Download CSV</button>
         <button id="dlJson" class="btn ghost">JSON</button>
@@ -114,6 +126,7 @@
 
     <div id="srch" class="ins" hidden>
       <div class="gw-hd"><b>🔎 Search comments</b> <span id="srchN" class="chat-sub" style="margin:0"></span></div>
+      <div id="srchNav" class="srch-nav" hidden><button id="srchPrev" type="button" title="Previous match">◀</button><span id="srchPos">0 / 0</span><button id="srchNext" type="button" title="Next match">▶</button><span class="srch-hint">on the page</span></div>
       <input id="srchQ" type="search" placeholder="price, shipping, @brand, 😍 …" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #e3d6de;border-radius:8px;font:inherit;font-size:13px" />
       <label class="chk" style="display:flex;align-items:center;gap:6px;font-size:12px;margin:6px 0 0;color:#555"><input id="srchSmart" type="checkbox" style="width:auto;margin:0"> ✨ Smart search (AI, finds comments that <i>mean</i> the same: "asking price" → "how much?")</label>
       <div id="srchList" class="ai-list" style="max-height:220px"></div>

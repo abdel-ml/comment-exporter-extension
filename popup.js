@@ -343,7 +343,8 @@ async function run() {
       setStatus((out && out.error) || "That export failed.", "err");
       return;
     }
-    rows = out.rows || [];
+    allRows = out.rows || [];
+    rows = allRows;
     transcriptTitle = out.title || "";
     if (out.owner) handleForName = out.owner;
     if (mode === "unfollowers" && out.followers) {
@@ -384,6 +385,9 @@ async function run() {
       $("gw").hidden = mode !== "comments";
       if (mode === "comments") renderInsights(); else $("ins").hidden = true;
       $("srch").hidden = mode !== "comments"; $("srchQ").value = ""; $("srchList").innerHTML = ""; $("srchN").textContent = "";
+      const canFilter = (mode === "hashtag" || mode === "posts");
+      $("rowFilter").hidden = !canFilter;
+      if (canFilter) { ["rfKw", "rfViews", "rfLikes"].forEach((id) => $(id).value = ""); $("rfType").value = ""; $("rfSort").value = ""; applyRowFilter(); }
       gwOwner = out.owner || "";
       $("gwRes").hidden = true;
       if (mode === "comments") gwUpdatePool();
@@ -747,6 +751,24 @@ function buildJson() {
 }
 
 let transcriptTitle = "";
+let allRows = [];
+const _num = (v) => Number(String(v == null ? 0 : v).replace(/[^0-9.]/g, "")) || 0;
+function applyRowFilter() {
+  const kw = $("rfKw").value.trim().toLowerCase();
+  const type = $("rfType").value, sort = $("rfSort").value;
+  const minV = _num($("rfViews").value), minL = _num($("rfLikes").value);
+  let r = allRows.filter((x) => {
+    if (type && (x.type || "") !== type) return false;
+    if (minV && _num(x.views) < minV) return false;
+    if (minL && _num(x.likes) < minL) return false;
+    if (kw && !String(x.caption || "").toLowerCase().includes(kw)) return false;
+    return true;
+  });
+  if (sort) r = [...r].sort((a, b) => _num(b[sort]) - _num(a[sort]));
+  rows = r;
+  $("rowCount").textContent = rows.length.toLocaleString();
+  $("rfCount").innerHTML = `Showing <b>${rows.length.toLocaleString()}</b> of ${allRows.length.toLocaleString()} (CSV/JSON export the filtered list)`;
+}
 function buildTxt() {
   return (transcriptTitle ? transcriptTitle + "\n\n" : "") + rows.map((r) => `[${r.start}] ${r.text}`).join("\n");
 }
@@ -865,7 +887,7 @@ let srchTimer;
 async function doSearch() {
   const q = $("srchQ").value.trim().toLowerCase();
   const list = $("srchList");
-  if (!q) { list.innerHTML = ""; $("srchN").textContent = ""; sendHighlight(""); return; }
+  if (!q) { list.innerHTML = ""; $("srchN").textContent = ""; $("srchNav").hidden = true; sendHighlight(""); return; }
   let hits;
   if ($("srchSmart").checked) {
     // Semantic search (SBERT on hammadi.dev): the comment texts are sent for this one request, never stored.
@@ -889,6 +911,9 @@ async function doSearch() {
     return `<div class="ai-item"><b>@${escapeHtml(r.author || "")}</b> <span class="c">· ${Number(String(r.likes).replace(/\D/g, "")) || 0} likes</span><div class="r">${t}</div></div>`;
   }).join("") + (hits.length > 60 ? `<p class="chat-sub">…and ${hits.length - 60} more (they're all in the CSV).</p>` : "");
   sendHighlight(q);
+}
+async function searchNav(dir) {
+  try { const tab = await findInstagramTab(); if (tab) chrome.tabs.sendMessage(tab.id, { igxSearchNav: dir }).catch(() => {}); } catch (_) {}
 }
 async function sendHighlight(q) {
   try { const tab = await findInstagramTab(); if (tab) chrome.tabs.sendMessage(tab.id, { igxSearch: q }).catch(() => {}); } catch (_) {}
@@ -1373,6 +1398,18 @@ function wire() {
   $("colorBtn").addEventListener("click", toggleColor);
   $("srchQ").addEventListener("input", () => { clearTimeout(srchTimer); srchTimer = setTimeout(doSearch, $("srchSmart").checked ? 600 : 150); });
   $("srchSmart").addEventListener("change", doSearch);
+  ["rfKw", "rfViews", "rfLikes"].forEach((id) => $(id).addEventListener("input", applyRowFilter));
+  ["rfType", "rfSort"].forEach((id) => $(id).addEventListener("change", applyRowFilter));
+  $("srchPrev").addEventListener("click", () => searchNav("prev"));
+  $("srchNext").addEventListener("click", () => searchNav("next"));
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg && msg.igxSearchCount) {
+      const { total, index } = msg.igxSearchCount;
+      $("srchNav").hidden = total <= 0;
+      $("srchPos").textContent = (total ? (index + 1) : 0) + " / " + total;
+      $("srchPrev").disabled = $("srchNext").disabled = total <= 1;
+    }
+  });
   ["infQ", "infPlat", "infCountry", "infMin", "infMax"].forEach((id) => $(id).addEventListener(id === "infQ" ? "input" : "change", () => { clearTimeout(infTimer); infTimer = setTimeout(infQuote, 400); }));
   $("chatAsk").addEventListener("click", chatAsk);
   $("chatQ").addEventListener("keydown", (e) => { if (e.key === "Enter") chatAsk(); });

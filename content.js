@@ -360,29 +360,45 @@
   setInterval(place, 1000);
 })();
 
-// --- Highlight comments matching the panel's search ---------------------------
+// --- Highlight comments matching the panel's search, with next/prev nav --------
 (function () {
-  let q = "";
-  function apply() {
-    document.querySelectorAll(".igx-hit").forEach((e) => e.classList.remove("igx-hit"));
-    if (!q || (Array.isArray(q) && !q.length)) return;
+  let q = "", hits = [], cur = -1;
+  function report() {
+    try { chrome.runtime.sendMessage({ igxSearchCount: { total: hits.length, index: cur } }); } catch (_) {}
+  }
+  function focus(i) {
+    if (!hits.length) return;
+    cur = (i + hits.length) % hits.length;
+    hits.forEach((e, k) => e.classList.toggle("igx-hit-cur", k === cur));
+    hits[cur].scrollIntoView({ behavior: "smooth", block: "center" });
+    report();
+  }
+  function apply(keepCur) {
+    const prev = keepCur && hits[cur];
+    document.querySelectorAll(".igx-hit, .igx-hit-cur").forEach((e) => e.classList.remove("igx-hit", "igx-hit-cur"));
+    hits = [];
+    if (!q || (Array.isArray(q) && !q.length)) { cur = -1; report(); return; }
     const spans = /youtube\.com$/.test(location.hostname) ? document.querySelectorAll("#content-text")
       : document.querySelectorAll("ul span[dir='auto'], div span[dir='auto']");
-    let first = null;
     for (const s of spans) {
       if (s.childElementCount > 3) continue;
       const t = (s.textContent || "").toLowerCase();
       const hit = Array.isArray(q) ? q.some((x) => x && t.startsWith(x.slice(0, 40))) : t.includes(q);
-      if (t.length > 1 && hit) { s.classList.add("igx-hit"); if (!first) first = s; }
+      if (t.length > 1 && hit) s.classList.add("igx-hit"), hits.push(s);
     }
-    if (first) first.scrollIntoView({ behavior: "smooth", block: "center" });
+    const keep = prev ? hits.indexOf(prev) : -1;
+    if (hits.length) focus(keep >= 0 ? keep : 0); else { cur = -1; report(); }
   }
   let obs = null;
   chrome.runtime.onMessage.addListener((msg) => {
-    if (msg && msg.igxSearch !== undefined) {
+    if (!msg) return;
+    if (msg.igxSearch !== undefined) {
       q = Array.isArray(msg.igxSearch) ? msg.igxSearch : String(msg.igxSearch || "").toLowerCase();
+      cur = -1;
       apply();
-      if (!obs) { obs = new MutationObserver(() => { if (q) { clearTimeout(obs.t); obs.t = setTimeout(apply, 300); } }); obs.observe(document.body, { childList: true, subtree: true }); }
+      if (!obs) { obs = new MutationObserver(() => { if (q) { clearTimeout(obs.t); obs.t = setTimeout(() => apply(true), 300); } }); obs.observe(document.body, { childList: true, subtree: true }); }
+    } else if (msg.igxSearchNav) {
+      focus(cur + (msg.igxSearchNav === "prev" ? -1 : 1));
     }
   });
 })();

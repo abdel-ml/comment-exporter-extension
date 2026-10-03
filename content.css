@@ -78,3 +78,4 @@ html.igx-ig #igx-panel{bottom:22px}
 #igx-tr:hover{background:#f2f2f2}
 #igx-panel.igx-open ~ #igx-tr{display:none}
 .igx-dlall + .igx-top{margin-left:8px}
+.igx-hit-cur{background:linear-gradient(transparent 50%,#fb923c 50%)!important;box-shadow:0 0 0 3px #f97316!important}
