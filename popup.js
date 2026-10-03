@@ -136,6 +136,7 @@ function applyMode() {
   if ($("ai")) $("ai").hidden = true;
   if ($("gw")) $("gw").hidden = true;
   if ($("ins")) $("ins").hidden = true;
+  if ($("srch")) $("srch").hidden = true;
 }
 
 function classify(url) {
@@ -295,6 +296,7 @@ async function run() {
       $("ai").hidden = mode !== "comments";
       $("gw").hidden = mode !== "comments";
       if (mode === "comments") renderInsights(); else $("ins").hidden = true;
+      $("srch").hidden = mode !== "comments"; $("srchQ").value = ""; $("srchList").innerHTML = ""; $("srchN").textContent = "";
       gwOwner = out.owner || "";
       $("gwRes").hidden = true;
       if (mode === "comments") gwUpdatePool();
@@ -541,6 +543,40 @@ function renderMedia(items) {
   $("mediaNoun").textContent = items.length === 1 ? "file" : "files";
   $("dlAllMedia").hidden = items.length < 2;
   $("mediaResult").hidden = false;
+}
+
+// --- Search inside comments (Instagram has none) ------------------------------
+let srchTimer;
+async function doSearch() {
+  const q = $("srchQ").value.trim().toLowerCase();
+  const list = $("srchList");
+  if (!q) { list.innerHTML = ""; $("srchN").textContent = ""; sendHighlight(""); return; }
+  let hits;
+  if ($("srchSmart").checked) {
+    // Semantic search (SBERT on hammadi.dev): the comment texts are sent for this one request, never stored.
+    $("srchN").textContent = "searching by meaning…";
+    try {
+      const r = await hd("/public/v1/ext/smart-search", { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ query: q, texts: rows.slice(0, 5000).map((x) => String(x.text || "")) }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error((d.detail && d.detail.error) || "Smart search failed.");
+      hits = d.hits.map((h) => ({ ...rows[h.i], score: h.score }));
+    } catch (e) { $("srchN").textContent = e.message; return; }
+    $("srchN").textContent = `${hits.length} similar comment${hits.length === 1 ? "" : "s"}`;
+    list.innerHTML = hits.slice(0, 60).map((r) => `<div class="ai-item"><b>@${escapeHtml(r.author || "")}</b> <span class="c">· ${Math.round(r.score * 100)}% match</span><div class="r">${escapeHtml(String(r.text || "").slice(0, 200))}</div></div>`).join("");
+    sendHighlight(hits.slice(0, 40).map((r) => String(r.text || "").slice(0, 60).toLowerCase()));
+    return;
+  }
+  hits = rows.filter((r) => String(r.text || "").toLowerCase().includes(q) || String(r.author || "").toLowerCase().includes(q));
+  $("srchN").textContent = `${hits.length.toLocaleString()} match${hits.length === 1 ? "" : "es"}`;
+  list.innerHTML = hits.slice(0, 60).map((r) => {
+    const t = escapeHtml(String(r.text || "").slice(0, 200)).replace(new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), (m) => `<mark>${m}</mark>`);
+    return `<div class="ai-item"><b>@${escapeHtml(r.author || "")}</b> <span class="c">· ${Number(String(r.likes).replace(/\D/g, "")) || 0} likes</span><div class="r">${t}</div></div>`;
+  }).join("") + (hits.length > 60 ? `<p class="chat-sub">…and ${hits.length - 60} more (they're all in the CSV).</p>` : "");
+  sendHighlight(q);
+}
+async function sendHighlight(q) {
+  try { const tab = await findInstagramTab(); if (tab) chrome.tabs.sendMessage(tab.id, { igxSearch: q }).catch(() => {}); } catch (_) {}
 }
 
 // --- Comment insights (local, no API key) ------------------------------------
@@ -1018,6 +1054,8 @@ function wire() {
   document.querySelectorAll(".auth-tabs button").forEach((b) => b.addEventListener("click", () => setAuthMode(b.dataset.a)));
   $("authBox").addEventListener("submit", doAuth);
   $("colorBtn").addEventListener("click", toggleColor);
+  $("srchQ").addEventListener("input", () => { clearTimeout(srchTimer); srchTimer = setTimeout(doSearch, $("srchSmart").checked ? 600 : 150); });
+  $("srchSmart").addEventListener("change", doSearch);
   $("chatAsk").addEventListener("click", chatAsk);
   $("chatQ").addEventListener("keydown", (e) => { if (e.key === "Enter") chatAsk(); });
   $("chatCfg").addEventListener("click", () => { $("ai").hidden = false; $("aiCfg").hidden = false; $("ai").scrollIntoView({ behavior: "smooth" }); });

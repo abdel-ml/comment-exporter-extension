@@ -281,6 +281,7 @@
     const code = codeNow();
     if (!code) return;
     const label = btn.querySelector("span");
+    btn.classList.add("busy");
     label.textContent = "Preparing…";
     try {
       const csrf = (document.cookie.match(/(?:^|; )csrftoken=([^;]+)/) || [])[1] || "";
@@ -302,7 +303,7 @@
     } catch (_) {
       label.textContent = "Couldn't download, log in to Instagram";
     }
-    setTimeout(() => { label.textContent = btn.dataset.label; }, 3500);
+    setTimeout(() => { label.textContent = btn.classList.contains("igx-dl-icon") ? "" : btn.dataset.label; btn.classList.remove("busy"); }, 3000);
   }
   function place() {
     const code = codeNow();
@@ -322,18 +323,46 @@
     }
     if (!bar) return;
     const isVideo = /\/(reel|reels|tv)\//.test(location.pathname) || !!document.querySelector("video");
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "igx-inline igx-dl";
+    // A native-looking icon next to Like / Comment / Share (tooltip shows what it does).
+    const share = bar.querySelector("svg[aria-label='Share'], svg[aria-label='Share Post']");
+    const shareBtn = share && (share.closest("[role=button], button") || share.parentElement);
+    const b = document.createElement("span");
+    b.className = "igx-dl-wrap igx-dl-icon";
     b.dataset.code = code;
     b.dataset.label = isVideo ? "Download reel" : "Download photos";
-    b.innerHTML = ICON + `<span>${b.dataset.label}</span>`;
+    b.title = b.dataset.label;
+    b.setAttribute("role", "button");
+    b.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-label="Download"><path d="M12 3.5v12m0 0-5-5m5 5 5-5M4.5 20.5h15"/></svg><span class="igx-dl-tip"></span>';
     b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); download(b); });
-    const wrap = document.createElement("div");
-    wrap.className = "igx-dl-wrap";
-    wrap.dataset.code = code;
-    wrap.appendChild(b);
-    bar.insertAdjacentElement("afterend", wrap);
+    if (shareBtn && shareBtn.parentElement) shareBtn.insertAdjacentElement("afterend", b);
+    else bar.insertAdjacentElement("afterend", b);
   }
   setInterval(place, 1000);
+})();
+
+// --- Highlight comments matching the panel's search ---------------------------
+(function () {
+  let q = "";
+  function apply() {
+    document.querySelectorAll(".igx-hit").forEach((e) => e.classList.remove("igx-hit"));
+    if (!q || (Array.isArray(q) && !q.length)) return;
+    const spans = /youtube\.com$/.test(location.hostname) ? document.querySelectorAll("#content-text")
+      : document.querySelectorAll("ul span[dir='auto'], div span[dir='auto']");
+    let first = null;
+    for (const s of spans) {
+      if (s.childElementCount > 3) continue;
+      const t = (s.textContent || "").toLowerCase();
+      const hit = Array.isArray(q) ? q.some((x) => x && t.startsWith(x.slice(0, 40))) : t.includes(q);
+      if (t.length > 1 && hit) { s.classList.add("igx-hit"); if (!first) first = s; }
+    }
+    if (first) first.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+  let obs = null;
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg && msg.igxSearch !== undefined) {
+      q = Array.isArray(msg.igxSearch) ? msg.igxSearch : String(msg.igxSearch || "").toLowerCase();
+      apply();
+      if (!obs) { obs = new MutationObserver(() => { if (q) { clearTimeout(obs.t); obs.t = setTimeout(apply, 300); } }); obs.observe(document.body, { childList: true, subtree: true }); }
+    }
+  });
 })();

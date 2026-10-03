@@ -81,6 +81,13 @@
       </div>
     </div>
 
+    <div id="srch" class="ins" hidden>
+      <div class="gw-hd"><b>🔎 Search comments</b> <span id="srchN" class="chat-sub" style="margin:0"></span></div>
+      <input id="srchQ" type="search" placeholder="price, shipping, @brand, 😍 …" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #e3d6de;border-radius:8px;font:inherit;font-size:13px" />
+      <label class="chk" style="display:flex;align-items:center;gap:6px;font-size:12px;margin:6px 0 0;color:#555"><input id="srchSmart" type="checkbox" style="width:auto;margin:0"> ✨ Smart search (AI, finds comments that <i>mean</i> the same: "asking price" → "how much?")</label>
+      <div id="srchList" class="ai-list" style="max-height:220px"></div>
+    </div>
+
     <div id="ins" class="ins" hidden>
       <div class="gw-hd"><b>📊 Comment insights</b></div>
       <div class="ins-bar"><i id="insPos"></i><i id="insNeu"></i><i id="insNeg"></i></div>

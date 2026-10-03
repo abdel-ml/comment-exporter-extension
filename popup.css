@@ -189,3 +189,5 @@ html.inpage .hd { padding-right: 46px; }
 .authbox input{padding:9px 10px;border:1px solid #e3d6de;border-radius:8px;font:inherit;font-size:13px}
 .auth-note{margin:0;color:#888;font-size:11.5px}
 .err{color:#c0392b;font-size:12px;margin:0}
+
+mark{background:#fde68a;color:inherit;border-radius:3px;padding:0 1px}
