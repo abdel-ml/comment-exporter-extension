@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "Instagram & YouTube Comment Exporter",
-  "version": "4.0.0",
-  "description": "Export Instagram & YouTube comments, Instagram posts and media to CSV/JSON. Runs in your own tab, no server.",
+  "name": "Instagram Comment & Reels Exporter",
+  "version": "4.1.0",
+  "description": "Export all comments of any Instagram post or reel, or all reels of a profile, to CSV. Runs in your own tab — no account, no server.",
   "author": "hammadi.dev",
   "homepage_url": "https://hammadi.dev",
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Export Instagram comments & posts"
+    "default_title": "Export Instagram comments & reels"
   },
   "icons": {
     "16": "icons/icon16.png",
@@ -18,58 +18,9 @@
     "activeTab",
     "downloads",
     "scripting",
-    "storage",
     "tabs"
   ],
   "host_permissions": [
-    "https://www.instagram.com/*",
-    "https://www.youtube.com/*",
-    "https://m.youtube.com/*",
-    "https://hammadi.dev/*",
-    "https://api.openai.com/*",
-    "https://api.anthropic.com/*"
-  ],
-  "content_scripts": [
-    {
-      "matches": [
-        "https://www.instagram.com/*"
-      ],
-      "js": [
-        "hook.js"
-      ],
-      "run_at": "document_start",
-      "world": "MAIN"
-    },
-    {
-      "matches": [
-        "https://www.instagram.com/*",
-        "https://www.youtube.com/*"
-      ],
-      "js": [
-        "content.js"
-      ],
-      "css": [
-        "content.css"
-      ],
-      "run_at": "document_idle"
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "popup.html",
-        "popup.css",
-        "popup.js",
-        "platforms.js",
-        "icons/*"
-      ],
-      "matches": [
-        "https://www.instagram.com/*",
-        "https://www.youtube.com/*"
-      ]
-    }
-  ],
-  "background": {
-    "service_worker": "bg.js"
-  }
+    "https://www.instagram.com/*"
+  ]
 }

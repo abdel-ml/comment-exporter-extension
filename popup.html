@@ -3,44 +3,23 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Instagram Exporter</title>
+  <title>Instagram Comment & Reels Exporter</title>
   <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
   <header class="hd">
     <div class="logo" aria-hidden="true">IG</div>
     <div>
-      <h1>Comment Exporter</h1>
-      <p class="sub">Instagram &amp; YouTube → CSV / JSON</p>
+      <h1>Comment &amp; Reels Exporter</h1>
+      <p class="sub">Instagram → CSV, in your own tab</p>
     </div>
   </header>
-
-  <div id="acct" class="acct">Checking your plan…</div>
-  <form id="authBox" class="authbox" hidden>
-    <div class="auth-tabs"><button type="button" data-a="signup" class="on">Create free account</button><button type="button" data-a="login">Log in</button></div>
-    <input id="authEmail" type="email" placeholder="Email" autocomplete="email" required />
-    <input id="authPw" type="password" placeholder="Password (8+ characters)" autocomplete="new-password" minlength="8" required />
-    <button id="authGo" type="submit" class="btn">Create account &amp; get 1 free export</button>
-    <p id="authErr" class="err" hidden></p>
-    <p class="auth-note">Takes 5 seconds. No card needed for the free export.</p>
-  </form>
 
   <div class="modebar">
     <label for="modeSel">Export</label>
     <select id="modeSel">
-      <option value="comments">Comments</option>
-      <option value="posts">Posts of a profile</option>
-      <option value="likers">Likers of a post</option>
-      <option value="followers">Followers</option>
-      <option value="following">Following</option>
-      <option value="suggested">Suggested (similar) accounts</option>
-      <option value="hashtag">Hashtag top posts</option>
-      <option value="unfollowers">My unfollowers / not following back</option>
-      <option value="dlprofile">⬇ Download a whole profile</option>
-      <option value="dllinks">⬇ Download from a list of links</option>
-      <option value="media">Photos &amp; videos</option>
-      <option value="ytsearch">YouTube search results</option>
-      <option value="yttranscript">YouTube transcript</option>
+      <option value="comments">Comments of a post or reel</option>
+      <option value="reels">Reels of a profile</option>
     </select>
   </div>
 
@@ -62,132 +41,22 @@
       </select>
     </label>
 
-    <div id="infBox" class="inf" hidden>
-      <input id="infQ" type="text" placeholder="Niche: skincare, fitness, vegan food…" />
-      <div class="inf-row">
-        <select id="infPlat"><option value="instagram">Instagram</option><option value="tiktok">TikTok</option><option value="youtube">YouTube</option></select>
-        <select id="infCountry"><option value="">Any country</option><option value="US">🇺🇸 United States</option><option value="GB">🇬🇧 United Kingdom</option><option value="CA">🇨🇦 Canada</option><option value="AU">🇦🇺 Australia</option><option value="DE">🇩🇪 Germany</option><option value="FR">🇫🇷 France</option><option value="ES">🇪🇸 Spain</option><option value="IT">🇮🇹 Italy</option><option value="BR">🇧🇷 Brazil</option><option value="MX">🇲🇽 Mexico</option><option value="IN">🇮🇳 India</option><option value="AE">🇦🇪 UAE</option><option value="SA">🇸🇦 Saudi Arabia</option><option value="MA">🇲🇦 Morocco</option><option value="NL">🇳🇱 Netherlands</option></select>
-      </div>
-      <div class="inf-row">
-        <select id="infMin"><option value="1000">1K+ followers</option><option value="10000">10K+</option><option value="50000">50K+</option><option value="100000">100K+</option><option value="1000000">1M+</option></select>
-        <select id="infMax"><option value="">No max</option><option value="10000">up to 10K</option><option value="50000">up to 50K</option><option value="100000">up to 100K</option><option value="1000000">up to 1M</option></select>
-      </div>
-      <p id="infTotal" class="inf-total"></p>
-      <div id="infList" class="ai-list"></div>
-      <div id="infBuy" class="inf-buy"></div>
-      <p class="chat-sub">From our influencer database. You get an Excel file by email (username, followers, engagement, country, public contact when available).</p>
-    </div>
-
-    <div id="dlOpts" class="dl-opts" hidden>
-      <label><input type="checkbox" id="dlPosts" checked> 🖼 Posts &amp; reels</label>
-      <label><input type="checkbox" id="dlStories" checked> ⭕ Stories</label>
-      <label><input type="checkbox" id="dlHl" checked> 🔖 Highlights</label>
-      <label class="new"><input type="checkbox" id="dlNew"> ✨ Only new since my last download</label>
-    </div>
-
-    <button id="run" class="go">Export</button>
-    <button id="colorBtn" type="button" class="btn ghost" style="width:100%;margin-top:8px">🎨 Color comments on the page</button>
-    <p id="colorRes" class="chat-sub" hidden></p>
-
-    <div id="chat" class="chat">
-      <div class="ai-hd"><b>🤖 Ask AI about this page</b><button id="chatCfg" type="button" class="link">⚙ API key</button></div>
-      <p class="chat-sub">Opens the profile, reel or video in your tab, reads it, and answers: "Is this profile a fit for my skincare brand?", "Why did this reel go viral?"</p>
-      <div id="chatLog" class="chat-log"></div>
-      <div class="ai-chat">
-        <input id="chatQ" type="text" placeholder="Is this creator a good fit for my brand?" />
-        <button id="chatAsk" type="button" class="btn">Ask</button>
-      </div>
-    </div>
+    <button id="run" class="go">Export &amp; download</button>
 
     <div id="status" class="status" hidden></div>
 
     <div id="result" class="result" hidden>
-      <p class="ok"><strong id="rowCount">0</strong> <span id="rowNoun">rows</span> ready</p>
-      <div id="rowFilter" class="rowf" hidden>
-        <input id="rfKw" type="search" placeholder="Caption contains… (keyword, #tag, @mention)" />
-        <div class="rowf-row">
-          <select id="rfType"><option value="">All types</option><option value="reel">Reels only</option><option value="video">Videos</option><option value="photo">Photos</option><option value="carousel">Carousels</option></select>
-          <select id="rfSort"><option value="">Sort: original</option><option value="views">Most views</option><option value="likes">Most likes</option><option value="comments">Most comments</option></select>
-        </div>
-        <div class="rowf-row">
-          <input id="rfViews" type="number" min="0" placeholder="Min views" />
-          <input id="rfLikes" type="number" min="0" placeholder="Min likes" />
-        </div>
-        <p id="rfCount" class="chat-sub" style="margin:2px 0 0"></p>
-      </div>
+      <p class="ok"><strong id="rowCount">0</strong> <span id="rowNoun">rows</span> exported — CSV downloaded.</p>
       <div class="dl">
-        <button id="dlCsv" class="btn">Download CSV</button>
-        <button id="dlJson" class="btn ghost">JSON</button>
-        <button id="dlTxt" class="btn ghost" hidden>TXT</button>
-        <button id="dlSrt" class="btn ghost" hidden>SRT</button>
+        <button id="dlAgain" class="btn">Download CSV again</button>
       </div>
-    </div>
-
-    <div id="srch" class="ins" hidden>
-      <div class="gw-hd"><b>🔎 Search comments</b> <span id="srchN" class="chat-sub" style="margin:0"></span></div>
-      <div id="srchNav" class="srch-nav" hidden><button id="srchPrev" type="button" title="Previous match">◀</button><span id="srchPos">0 / 0</span><button id="srchNext" type="button" title="Next match">▶</button><span class="srch-hint">on the page</span></div>
-      <input id="srchQ" type="search" placeholder="price, shipping, @brand, 😍 …" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #e3d6de;border-radius:8px;font:inherit;font-size:13px" />
-      <div id="srchList" class="ai-list" style="max-height:220px"></div>
-    </div>
-
-    <div id="ins" class="ins" hidden>
-      <div class="gw-hd"><b>📊 Comment insights</b></div>
-      <div class="ins-bar"><i id="insPos"></i><i id="insNeu"></i><i id="insNeg"></i></div>
-      <p id="insPct" class="ins-pct"></p>
-      <div id="insKpi" class="ins-kpi"></div>
-      <div id="insCloud" class="ins-cloud"></div>
-      <div id="insEmo" class="ins-emo"></div>
-    </div>
-
-    <div id="gw" class="gw" hidden>
-      <div class="gw-hd"><b>🎁 Pick a giveaway winner</b></div>
-      <div class="gw-opts">
-        <label>Winners <select id="gwN"><option>1</option><option>2</option><option>3</option><option>5</option><option>10</option></select></label>
-        <label>Must tag <select id="gwTags"><option value="0">no one</option><option value="1">1 friend</option><option value="2">2 friends</option><option value="3">3 friends</option></select></label>
-        <label class="wide">Must contain <input id="gwKw" type="text" placeholder="optional keyword, e.g. done" /></label>
-        <label class="chk"><input id="gwUnique" type="checkbox" checked /> One entry per person</label>
-        <label class="chk"><input id="gwOwner" type="checkbox" checked /> Exclude the post owner</label>
-      </div>
-      <p id="gwPool" class="gw-pool"></p>
-      <button id="gwGo" type="button" class="btn">Pick winner</button>
-      <div id="gwRoll" class="gw-roll" hidden></div>
-      <div id="gwRes" class="gw-res" hidden></div>
-    </div>
-
-    <div id="ai" class="ai" hidden>
-      <div class="ai-hd"><b>✨ AI replies & chat</b><button id="aiCfgBtn" type="button" class="link">⚙ API key</button></div>
-      <div id="aiCfg" class="ai-cfg" hidden>
-        <select id="aiProv"><option value="openai">OpenAI</option><option value="anthropic">Claude (Anthropic)</option></select>
-        <input id="aiKey" type="password" placeholder="Your API key (stored only in this browser)" autocomplete="off" />
-        <input id="aiModel" type="text" placeholder="Model (optional)" />
-        <input id="aiVoice" type="text" placeholder="Your brand / tone, e.g. friendly skincare brand, link in bio" />
-        <button id="aiSave" type="button" class="btn ghost">Save</button>
-      </div>
-      <button id="aiSuggest" type="button" class="btn">Suggest replies to top comments</button>
-      <div id="aiList" class="ai-list"></div>
-      <div class="ai-chat">
-        <input id="aiQ" type="text" placeholder="Ask about these comments: what do people complain about?" />
-        <button id="aiAsk" type="button" class="btn ghost">Ask</button>
-      </div>
-      <div id="aiAns" class="ai-ans" hidden></div>
-      <p class="ai-note">Replies are suggestions: copy and post them yourself. Auto-posting gets accounts banned.</p>
-    </div>
-
-    <div id="mediaResult" class="result" hidden>
-      <p class="ok"><strong id="mediaCount">0</strong> <span id="mediaNoun">files</span> found</p>
-      <div id="dlKinds" class="dl-kinds" hidden></div>
-      <div id="dlBar" class="dl-bar" hidden><div class="dl-track"><div id="dlBarFill" class="dl-fill"></div></div><p id="dlBarTx"></p></div>
-      <button id="dlAllMedia" class="btn" hidden>Download all</button>
-      <div id="mediaList" class="mgrid"></div>
     </div>
   </main>
 
   <footer class="ft">
     <span id="quota">Runs in your own tab · private to you</span>
-    <a id="feedback" href="https://hammadi.dev/feedback?from=extension" target="_blank" rel="noopener">💬 Share feedback</a>
   </footer>
 
-  <script src="platforms.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

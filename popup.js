@@ -1,399 +1,171 @@
-"use strict";
+// Instagram Comment & Reels Exporter — popup.
+//
+// Two jobs, nothing else:
+//   • Comments  — every comment & reply of a post or reel.
+//   • Reels     — every reel of a profile, with views/likes/comments.
+// The scraping runs INSIDE the user's own logged-in Instagram tab (injected via
+// chrome.scripting), so the user's own session is used and no server sees the
+// data. When an export finishes, the CSV downloads automatically.
 
-// v2: everything runs inside the user's own Instagram tab (their session),
-// through chrome.scripting. No third-party server sees the data or the user.
-// Requests are paced (about one per second) to stay gentle on the account.
+const $ = (id) => document.getElementById(id);
+
+let mode = "comments";
+let rows = [];
+let igTabId = null;
+let handleForName = "export";
 
 const MODES = {
-  influencers: {
-    noun: "influencers",
-    label: "Find influencers",
-    placeholder: "",
-    hint: "Search our influencer database by niche, country and size. Pay only for the list you want.",
-    columns: [],
-  },
   comments: {
-    noun: "comments",
-    label: "Post or reel URL",
+    inputLabel: "Post or reel URL",
     placeholder: "https://www.instagram.com/reel/...",
     hint: "Open a post or reel in an Instagram tab where you are logged in.",
+    noun: "comments",
     columns: [
       ["author", (r) => r.author],
       ["text", (r) => r.text],
       ["likes", (r) => r.likes],
       ["replies", (r) => r.replies],
-      ["is_reply", (r) => r.is_reply],
-      ["posted_at", (r) => toIso(r.created_at)],
-      ["profile", (r) => r.author ? `https://www.instagram.com/${r.author}/` : ""],
+      ["is_reply", (r) => (r.is_reply ? "yes" : "no")],
+      ["created_at", (r) => toIso(r.created_at)],
     ],
   },
-  posts: {
-    noun: "posts",
-    label: "Instagram profile URL or @handle",
-    placeholder: "https://www.instagram.com/nasa/  or  @nasa",
-    hint: "Open a profile in your Instagram tab, or paste its URL / @handle.",
+  reels: {
+    inputLabel: "Profile URL or @handle",
+    placeholder: "https://www.instagram.com/username/  or  @username",
+    hint: "The profile you want the reels from — it opens in your Instagram tab.",
+    noun: "reels",
     columns: [
       ["url", (r) => r.url],
-      ["type", (r) => r.type],
-      ["posted_at", (r) => toIso(r.taken_at)],
+      ["views", (r) => r.views],
       ["likes", (r) => r.likes],
       ["comments", (r) => r.comments],
-      ["views", (r) => r.views],
+      ["taken_at", (r) => toIso(r.taken_at)],
       ["caption", (r) => r.caption],
     ],
   },
-  likers: {
-    noun: "likers",
-    label: "Post or reel URL",
-    placeholder: "https://www.instagram.com/p/...",
-    hint: "Open a post or reel in your Instagram tab. Instagram shows up to ~100 likers per post.",
-    columns: [
-      ["username", (r) => r.username],
-      ["full_name", (r) => r.full_name],
-      ["verified", (r) => r.verified],
-      ["private", (r) => r.private],
-      ["profile", (r) => r.username ? `https://www.instagram.com/${r.username}/` : ""],
-    ],
-  },
-  followers: {
-    noun: "followers",
-    label: "Instagram profile URL or @handle",
-    placeholder: "@nasa",
-    hint: "Instagram shows only ~50 followers of other accounts; your own account's list is complete.",
-    columns: [
-      ["username", (r) => r.username],
-      ["full_name", (r) => r.full_name],
-      ["verified", (r) => r.verified],
-      ["private", (r) => r.private],
-      ["profile", (r) => r.username ? `https://www.instagram.com/${r.username}/` : ""],
-    ],
-  },
-  following: {
-    noun: "accounts",
-    label: "Instagram profile URL or @handle",
-    placeholder: "@nasa",
-    hint: "Public profiles, or private ones you follow.",
-    columns: [
-      ["username", (r) => r.username],
-      ["full_name", (r) => r.full_name],
-      ["verified", (r) => r.verified],
-      ["private", (r) => r.private],
-      ["profile", (r) => r.username ? `https://www.instagram.com/${r.username}/` : ""],
-    ],
-  },
-  hashtag: {
-    noun: "posts",
-    label: "Hashtag",
-    placeholder: "#lipgloss",
-    hint: "Top posts and reels of a hashtag, with likes, comments and views.",
-    columns: [
-      ["url", (r) => r.url], ["type", (r) => r.type], ["author", (r) => r.author], ["posted_at", (r) => toIso(r.taken_at)],
-      ["likes", (r) => r.likes], ["comments", (r) => r.comments], ["views", (r) => r.views], ["caption", (r) => r.caption],
-    ],
-  },
-  unfollowers: {
-    noun: "accounts",
-    label: "Your account",
-    placeholder: "(uses the Instagram account you're logged in with)",
-    hint: "Who doesn't follow you back, and who unfollowed you since your last check. Your own account only.",
-    columns: [
-      ["username", (r) => r.username], ["full_name", (r) => r.full_name], ["status", (r) => r.status],
-      ["verified", (r) => r.verified], ["profile", (r) => r.username ? `https://www.instagram.com/${r.username}/` : ""],
-    ],
-  },
-  suggested: {
-    noun: "suggested accounts",
-    label: "Instagram profile URL or @handle",
-    placeholder: "@nasa",
-    hint: "Accounts Instagram suggests as similar to this profile.",
-    columns: [
-      ["username", (r) => r.username],
-      ["full_name", (r) => r.full_name],
-      ["verified", (r) => r.verified],
-      ["private", (r) => r.private],
-      ["profile", (r) => r.username ? `https://www.instagram.com/${r.username}/` : ""],
-    ],
-  },
-  yttranscript: {
-    noun: "lines",
-    label: "YouTube video",
-    placeholder: "https://www.youtube.com/watch?v=...",
-    hint: "Open the video in a YouTube tab. You get every line with its timestamp (TXT, SRT, CSV).",
-    columns: [["start", (r) => r.start], ["seconds", (r) => r.seconds], ["text", (r) => r.text]],
-  },
-  ytsearch: {
-    noun: "videos",
-    label: "YouTube search",
-    placeholder: "https://www.youtube.com/results?search_query=...",
-    hint: "Open a YouTube search in your tab, or type what to search.",
-    columns: [
-      ["title", (r) => r.title], ["channel", (r) => r.channel], ["views", (r) => r.views], ["published", (r) => r.published],
-      ["duration", (r) => r.duration], ["url", (r) => r.url], ["channel_url", (r) => r.channel_url], ["description", (r) => r.description],
-    ],
-  },
-  dlprofile: {
-    noun: "files",
-    label: "Instagram profile URL or @handle",
-    placeholder: "https://www.instagram.com/nasa/  or  @nasa",
-    hint: "Download a whole profile: posts, reels, stories and highlights, into a folder.",
-    isMedia: true,
-  },
-  dllinks: {
-    noun: "files",
-    label: "Post / reel links (paste as many as you want)",
-    placeholder: "https://www.instagram.com/p/…  https://www.instagram.com/reel/…",
-    hint: "Paste many links at once (spaces, commas or new lines). Every photo and video gets downloaded.",
-    isMedia: true,
-  },
-  media: {
-    noun: "media files",
-    label: "Post or reel URL",
-    placeholder: "https://www.instagram.com/p/...",
-    hint: "Open a post or reel in your Instagram tab to download its photos & videos.",
-    isMedia: true,
-  },
 };
 
-let mode = "comments";
-let rows = [];
-let handleForName = "instagram";
-let igTabId = null;
-let site = "instagram"; // or "youtube"
-const SITE_RE = { instagram: /^https:\/\/www\.instagram\.com\//, youtube: /^https:\/\/(www|m)\.youtube\.com\// };
-
-const $ = (id) => document.getElementById(id);
-
 function toIso(epoch) {
-  if (!epoch && epoch !== 0) return "";
-  const n = Number(epoch);
-  return Number.isFinite(n) ? new Date(n * 1000).toISOString() : String(epoch);
+  return epoch ? new Date(epoch * 1000).toISOString() : "";
 }
 
-function applyMode() {
-  const m = MODES[mode];
-  $("inputLabel").textContent = m.label;
-  $("target").placeholder = m.placeholder;
-  $("inputHint").textContent = m.hint;
-  $("rowNoun").textContent = m.noun;
-  $("modeSel").value = mode;
-  $("countRow").hidden = (!!m.isMedia && mode !== "dlprofile") || mode === "yttranscript" || mode === "unfollowers";
-  $("dlOpts").hidden = mode !== "dlprofile";
-  const inf = mode === "influencers";
-  $("infBox").hidden = !inf;
-  $("target").closest("label").hidden = inf;
-  $("run").hidden = inf;
-  if (inf) { $("countRow").hidden = true; infQuote(); }
-  else $("run").hidden = false;
-  $("run").textContent = mode === "dlprofile" ? "Find everything to download" : m.isMedia ? "Get photos & videos" : "Export";
-  $("result").hidden = true;
-  $("mediaResult").hidden = true;
-  $("status").hidden = true;
-  if ($("ai")) $("ai").hidden = true;
-  if ($("gw")) $("gw").hidden = true;
-  if ($("ins")) $("ins").hidden = true;
-  if ($("srch")) $("srch").hidden = true;
-}
-
-function classify(url) {
-  try {
-    const u = new URL(url);
-    if (/(^|\.)youtube\.com$/.test(u.hostname) && u.pathname === "/results") {
-      return { mode: "ytsearch", value: u.href, site: "youtube" };
-    }
-    if (/(^|\.)youtube\.com$/.test(u.hostname) && (u.pathname === "/watch" || u.pathname.startsWith("/shorts/"))) {
-      return { mode: "comments", value: u.href, site: "youtube" };
-    }
-    if (!/(^|\.)instagram\.com$/.test(u.hostname)) return null;
-    if (/^\/(p|reel|reels|tv)\//.test(u.pathname)) return { mode: "comments", value: u.origin + u.pathname };
-    const seg = u.pathname.split("/").filter(Boolean);
-    const reserved = new Set(["explore", "accounts", "direct", "stories", "about"]);
-    if (seg.length >= 1 && !reserved.has(seg[0])) return { mode: "posts", value: "https://www.instagram.com/" + seg[0] + "/" };
-  } catch (_) {}
-  return null;
-}
-
-// The Instagram tab to work in: the active tab if it is Instagram, else any open one.
-async function findInstagramTab(want) {
-  const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
-  for (const k of want ? [want] : ["instagram", "youtube"]) {
-    if (active && SITE_RE[k].test(active.url || "")) return active;
-  }
-  const tabs = await chrome.tabs.query({ url: want === "youtube" ? ["https://www.youtube.com/*"] : ["https://www.instagram.com/*"] });
-  return tabs[0] || null;
-}
-
-function setSite(s) {
-  site = s;
-  for (const o of $("modeSel").options) o.hidden = s === "youtube" ? !["comments", "ytsearch", "yttranscript", "influencers"].includes(o.value) : ["ytsearch", "yttranscript"].includes(o.value);
-  if (s === "youtube") {
-    if (!["comments", "ytsearch", "yttranscript"].includes(mode)) mode = "comments";
-    MODES.comments.placeholder = "https://www.youtube.com/watch?v=...";
-    MODES.comments.label = "YouTube video or Short";
-    MODES.comments.hint = "Open the video in a YouTube tab.";
-  }
-}
-
-async function prefillFromTab(keepMode) {
-  try {
-    const tab = await findInstagramTab();
-    if (!tab) return;
-    igTabId = tab.id;
-    const hit = classify(tab.url);
-    if (!hit) return;
-    if (keepMode) {
-      // Same page, other export: reuse the URL when it fits the chosen mode.
-      if (mode === "unfollowers") { $("target").value = "me"; return; }
-      if (mode === "dllinks") return;
-      if (mode === "yttranscript") { if (hit.site === "youtube" && hit.mode === "comments") $("target").value = hit.value; return; }
-      if (mode === "dlprofile") { const u = (tab.url.match(/instagram\.com\/([^/?#]+)\/?(?:[?#]|$)/) || [])[1]; if (u && !/^(p|reel|reels|explore|direct|stories|accounts)$/.test(u)) $("target").value = "@" + u; return; }
-      if (mode === "hashtag") { const t = (tab.url.match(/\/explore\/tags\/([^/?#]+)/) || [])[1]; if (t) $("target").value = "#" + t; return; }
-      const postLike = ["comments", "likers", "media"].includes(mode), profLike = ["posts", "followers", "following", "suggested"].includes(mode);
-      if ((postLike && /\/(p|reel|reels|tv)\//.test(hit.value)) || (profLike && hit.mode === "posts") || (mode === hit.mode)) $("target").value = hit.value;
-      else if (profLike && /instagram\.com/.test(tab.url)) {
-        const owner = document.querySelector("#target").value;
-        if (!owner) $("target").value = "";
-      }
-      return;
-    }
-    {
-      setSite(hit.site || "instagram");
-      mode = hit.mode;
-      applyMode();
-      $("target").value = hit.value;
-    }
-  } catch (_) {}
-}
-
-function setStatus(msg, kind, pct) {
+function setStatus(msg, kind) {
   const el = $("status");
   el.hidden = false;
-  el.className = "status" + (kind === "err" ? " err" : "");
-  el.innerHTML = kind === "run"
-    ? `${escapeHtml(msg)}<div class="bar"><i style="${pct != null ? `animation:none;width:${pct}%` : ""}"></i></div>`
-    : escapeHtml(msg);
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  el.className = "status" + (kind ? " " + kind : "");
+  el.textContent = msg;
 }
 
 function nameFromValue(v) {
-  const m = String(v).match(/instagram\.com\/([^/?#]+)/) || String(v).match(/@?([\w.]+)/);
-  return (m && m[1]) ? m[1].replace(/^@/, "") : "instagram";
+  const code = (String(v).match(/\/(?:p|reel|reels|tv)\/([A-Za-z0-9_-]+)/) || [])[1];
+  if (code) return code;
+  const u = (String(v).match(/instagram\.com\/([^/?#]+)/) || String(v).match(/@?([\w.]+)/) || [])[1];
+  return (u || "export").replace(/^@/, "");
 }
 
-// Progress messages from the script running in the Instagram tab.
-chrome.runtime.onMessage.addListener((msg) => {
-  if (msg && msg.igxProgress) {
-    const p = msg.igxProgress;
-    setStatus(`${p.text}`, "run", p.total ? Math.min(99, Math.round((p.n / p.total) * 100)) : null);
+function applyMode() {
+  mode = $("modeSel").value;
+  const m = MODES[mode];
+  $("inputLabel").textContent = m.inputLabel;
+  $("target").placeholder = m.placeholder;
+  $("inputHint").textContent = m.hint;
+}
+
+async function findInstagramTab() {
+  const tabs = await chrome.tabs.query({});
+  const isIg = (t) => /:\/\/(www\.)?instagram\.com\//.test(t.url || "");
+  return tabs.find((t) => t.active && isIg(t)) || tabs.find(isIg) || null;
+}
+
+function waitForComplete(tabId) {
+  return new Promise((resolve) => {
+    const done = (id, info) => {
+      if (id === tabId && info.status === "complete") {
+        chrome.tabs.onUpdated.removeListener(done);
+        resolve();
+      }
+    };
+    chrome.tabs.onUpdated.addListener(done);
+    setTimeout(resolve, 20000);
+  });
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function prefillFromTab() {
+  try {
+    const tab = await findInstagramTab();
+    if (!tab || !tab.active) return;
+    const url = tab.url || "";
+    if (/\/(p|reel|reels|tv)\//.test(url)) {
+      $("modeSel").value = "comments";
+      $("target").value = url;
+    } else {
+      const u = (url.match(/instagram\.com\/([^/?#]+)\/?(?:[?#]|$)/) || [])[1];
+      if (u && !/^(p|reel|reels|explore|direct|stories|accounts)$/.test(u)) {
+        $("modeSel").value = "reels";
+        $("target").value = "@" + u;
+      }
+    }
+    applyMode();
+  } catch (_) {
+    /* ignore */
   }
-});
+}
 
 async function run() {
-  const m = MODES[mode];
-  if (mode === "unfollowers") $("target").value = "me";
+  mode = $("modeSel").value;
   const value = $("target").value.trim();
   if (!value) {
-    setStatus(`Enter ${mode === "posts" ? "a profile URL or @handle" : "a post or reel URL"}.`, "err");
+    setStatus(`Enter ${mode === "reels" ? "a profile URL or @handle" : "a post or reel URL"}.`, "err");
     return;
   }
-  const isYt = mode === "ytsearch" || mode === "yttranscript" || /youtube\.com|youtu\.be/.test(value);
-  setSite(isYt ? "youtube" : "instagram");
-  const tab = await findInstagramTab(site);
+  const tab = await findInstagramTab();
   if (!tab) {
-    setStatus(isYt ? "Open the video in a YouTube tab, then try again." : "Open instagram.com in a tab and log in, then try again.", "err");
+    setStatus("Open instagram.com in a tab and log in, then try again.", "err");
     return;
-  }
-  const ytTarget = mode === "ytsearch" && !/^https?:/.test(value)
-    ? `https://www.youtube.com/results?search_query=${encodeURIComponent(value)}` : value;
-  if (isYt && tab.url !== ytTarget && tab.url.split("&")[0] !== ytTarget.split("&")[0]) {
-    await chrome.tabs.update(tab.id, { url: ytTarget });
-    await new Promise((r) => setTimeout(r, 4000));
   }
   igTabId = tab.id;
   handleForName = nameFromValue(value);
   const count = Number($("count").value) || 500;
-  if (!(await allowExport())) return;
 
   $("run").disabled = true;
   $("result").hidden = true;
-  $("mediaResult").hidden = true;
   setStatus("Starting in your Instagram tab…", "run");
   try {
-    const [res] = await chrome.scripting.executeScript(site === "youtube"
-      ? (mode === "ytsearch" ? { target: { tabId: igTabId }, func: ytxSearch, args: [count] }
-         : mode === "yttranscript" ? { target: { tabId: igTabId }, func: ytxTranscript, args: [] }
-                             : { target: { tabId: igTabId }, func: ytxComments, args: [count] })
-      : { target: { tabId: igTabId }, func: igxScrape, args: [mode, value, count, dlOptions()] });
+    let [res] = await chrome.scripting.executeScript({
+      target: { tabId: igTabId },
+      func: igxScrape,
+      args: [mode, value, count],
+    });
     let out = res && res.result;
     if (out && out.navigate) {
       setStatus("Opening the profile in your Instagram tab…", "run");
       await chrome.tabs.update(igTabId, { url: out.navigate });
-      await new Promise((resolve) => {
-        const done = (id, info) => { if (id === igTabId && info.status === "complete") { chrome.tabs.onUpdated.removeListener(done); resolve(); } };
-        chrome.tabs.onUpdated.addListener(done);
-        setTimeout(resolve, 20000);
+      await waitForComplete(igTabId);
+      await sleep(3000);
+      [res] = await chrome.scripting.executeScript({
+        target: { tabId: igTabId },
+        func: igxScrape,
+        args: [mode, value, count],
       });
-      await new Promise((r) => setTimeout(r, 3000));
-      const [res2] = await chrome.scripting.executeScript({ target: { tabId: igTabId }, func: igxScrape, args: [mode, value, count, dlOptions()] });
-      out = res2 && res2.result;
+      out = res && res.result;
     }
     if (!out || out.error) {
       setStatus((out && out.error) || "That export failed.", "err");
       return;
     }
-    allRows = out.rows || [];
-    rows = allRows;
-    transcriptTitle = out.title || "";
+    rows = out.rows || [];
     if (out.owner) handleForName = out.owner;
-    if (mode === "unfollowers" && out.followers) {
-      // compare with the follower list saved at the last check -> who unfollowed since
-      const key = "igxFollowersSnapshot";
-      const prev = ((await chrome.storage.local.get(key))[key]) || null;
-      const now = new Set(out.followers.map((u) => u.username));
-      if (prev && Array.isArray(prev.list)) {
-        const gone = prev.list.filter((u) => !now.has(u.username));
-        rows = gone.map((u) => ({ ...u, status: `unfollowed you (since ${new Date(prev.at).toLocaleDateString()})` })).concat(rows);
-        out.note = `${gone.length} unfollowed you since your last check · ` + (out.note || "");
-      } else {
-        out.note = "First check saved. Next time we'll also show who unfollowed you. " + (out.note || "");
-      }
-      await chrome.storage.local.set({ [key]: { at: Date.now(), list: out.followers } });
-      if (!rows.length) { $("status").hidden = false; setStatus("🎉 Everyone you follow follows you back. " + (out.note || "")); return; }
-    }
-    if (mode === "dlprofile" && $("dlNew").checked) {
-      const key = "igxDl_" + (out.owner || "").toLowerCase();
-      const done = new Set(((await chrome.storage.local.get(key))[key]) || []);
-      const before = rows.length;
-      rows = rows.filter((r) => !done.has(r.key));
-      out.note = `${(before - rows.length).toLocaleString()} already downloaded before, ${rows.length.toLocaleString()} new.`;
-      if (!rows.length) { setStatus("✅ Nothing new since your last download of @" + out.owner + "."); return; }
-    }
-    if (rows.length) markUsed();
     if (!rows.length) {
-      setStatus("No " + m.noun + " found. The account may be private, or the post has none.", "err");
+      setStatus(`No ${MODES[mode].noun} found. The account may be private, or the post has none.`, "err");
       return;
     }
-    $("status").hidden = true;
-    if (m.isMedia) { renderMedia(rows); if (out.note) { $("status").hidden = false; setStatus(out.note); } }
-    else {
-      $("rowCount").textContent = rows.length.toLocaleString();
-      $("result").hidden = false;
-      $("ai").hidden = mode !== "comments";
-      $("dlTxt").hidden = $("dlSrt").hidden = mode !== "yttranscript";
-      $("gw").hidden = mode !== "comments";
-      if (mode === "comments") renderInsights(); else $("ins").hidden = true;
-      $("srch").hidden = mode !== "comments"; $("srchQ").value = ""; $("srchList").innerHTML = ""; $("srchN").textContent = "";
-      const canFilter = (mode === "hashtag" || mode === "posts");
-      $("rowFilter").hidden = !canFilter;
-      if (canFilter) { ["rfKw", "rfViews", "rfLikes"].forEach((id) => $(id).value = ""); $("rfType").value = ""; $("rfSort").value = ""; applyRowFilter(); }
-      gwOwner = out.owner || "";
-      $("gwRes").hidden = true;
-      if (mode === "comments") gwUpdatePool();
-      suggestions = {}; $("aiList").innerHTML = ""; $("aiAns").hidden = true;
-      if (out.note) setStatus(out.note);
-    }
+    autoDownload();
+    $("rowCount").textContent = rows.length.toLocaleString();
+    $("rowNoun").textContent = MODES[mode].noun;
+    $("result").hidden = false;
+    setStatus(`✅ ${rows.length.toLocaleString()} ${MODES[mode].noun} exported — CSV downloaded.`, "ok");
   } catch (err) {
     setStatus("Could not run in the Instagram tab: " + (err && err.message ? err.message : err), "err");
   } finally {
@@ -402,10 +174,10 @@ async function run() {
 }
 
 // ---------------------------------------------------------------------------
-// Runs INSIDE the Instagram tab (content-script world, same origin as the
-// site, so the user's own session is used). Must be self-contained.
+// Runs INSIDE the Instagram tab (same origin as the site, so the user's own
+// session is used). Must be fully self-contained — no outside references.
 // ---------------------------------------------------------------------------
-async function igxScrape(mode, value, limit, opts) {
+async function igxScrape(mode, value, limit) {
   const APP_ID = "936619743392459";
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const pace = () => sleep(800 + Math.random() * 700);
@@ -474,25 +246,26 @@ async function igxScrape(mode, value, limit, opts) {
       return { rows: rows.slice(0, limit), owner: item.user && item.user.username };
     }
 
-    if (mode === "posts") {
+    if (mode === "reels") {
       const m = String(value).match(/instagram\.com\/([^/?#]+)/) || String(value).match(/@?([\w.]+)/);
       const username = m && m[1].replace(/^@/, "");
       if (!username) return { error: "Enter a profile URL or @handle." };
-      // Instagram's web app no longer serves the feed API, so read the profile
-      // grid like a person would: scroll it, collect post links, then fetch each
-      // post's stats (the post-info endpoint still works for web sessions).
-      const onProfile = location.pathname.toLowerCase().replace(/\/+$/, "").split("/")[1] === username.toLowerCase();
-      if (!onProfile) return { navigate: `https://www.instagram.com/${username}/` };
+      // Instagram's web app no longer serves a reels feed API, so read the
+      // profile's reels grid like a person would: scroll it, collect reel links,
+      // then fetch each reel's stats (the media-info endpoint still works).
+      const want = `/${username.toLowerCase()}/reels`;
+      const here = location.pathname.toLowerCase().replace(/\/+$/, "");
+      if (!here.startsWith(want)) return { navigate: `https://www.instagram.com/${username}/reels/` };
       const codes = [];
       const seen = new Set();
       let idle = 0;
-      while (codes.length < limit && idle < 5) {
+      while (codes.length < limit && idle < 6) {
         const before = codes.length;
-        for (const a of document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]')) {
+        for (const a of document.querySelectorAll('a[href*="/reel/"]')) {
           const c = codeOf(a.getAttribute("href"));
           if (c && !seen.has(c)) { seen.add(c); codes.push(c); }
         }
-        progress(Math.min(codes.length, limit), limit, `Found ${Math.min(codes.length, limit).toLocaleString()} posts on the profile…`);
+        progress(Math.min(codes.length, limit), limit, `Found ${Math.min(codes.length, limit).toLocaleString()} reels on the profile…`);
         idle = codes.length === before ? idle + 1 : 0;
         window.scrollTo(0, document.body.scrollHeight);
         await sleep(1300);
@@ -506,231 +279,26 @@ async function igxScrape(mode, value, limit, opts) {
           const info = await api(`/api/v1/media/${shortcodeToPk(code)}/info/`);
           const it = (info.items || [])[0];
           if (it) rows.push({
-            url: `https://www.instagram.com/${it.product_type === "clips" ? "reel" : "p"}/${it.code}/`,
-            type: it.product_type === "clips" ? "reel" : it.media_type === 8 ? "carousel" : it.media_type === 2 ? "video" : "photo",
-            taken_at: it.taken_at, likes: it.like_count, comments: it.comment_count,
-            views: it.play_count || it.view_count || "", caption: it.caption && it.caption.text,
+            url: `https://www.instagram.com/reel/${it.code}/`,
+            views: it.play_count || it.view_count || "", likes: it.like_count, comments: it.comment_count,
+            taken_at: it.taken_at, caption: it.caption && it.caption.text,
           });
         } catch (e) {
           if (/rate-limiting/.test(e.message)) { if (rows.length) break; throw e; }
         }
-        progress(rows.length, total, `${rows.length.toLocaleString()} of ${total.toLocaleString()} posts…`);
+        progress(rows.length, total, `${rows.length.toLocaleString()} of ${total.toLocaleString()} reels…`);
         await pace();
       }
       return { rows: rows.slice(0, limit), owner: username };
     }
 
-    if (mode === "likers") {
-      const code = codeOf(value);
-      if (!code) return { error: "That doesn't look like a post or reel link." };
-      const d = await api(`/api/v1/media/${shortcodeToPk(code)}/likers/`);
-      const rows = (d.users || []).slice(0, limit).map((u) => ({ username: u.username, full_name: u.full_name,
-        verified: !!u.is_verified, private: !!u.is_private }));
-      return { rows, owner: code };
-    }
-
-    if (mode === "hashtag") {
-      const tag = String(value).replace(/^.*\/tags\//, "").replace(/[#\s/]/g, "").toLowerCase();
-      if (!tag) return { error: "Enter a hashtag." };
-      const info = await api(`/api/v1/tags/web_info/?tag_name=${encodeURIComponent(tag)}`);
-      const total = (info.data && info.data.media_count) || info.count || 0;
-      const rows = [], seen = new Set();
-      let maxId = null, page = 0;
-      const take = (obj) => {
-        (function walk(o) {
-          if (!o || typeof o !== "object") return;
-          const m = o.media && o.media.code ? o.media : (o.code && o.taken_at ? o : null);
-          if (m && !seen.has(m.code)) {
-            seen.add(m.code);
-            rows.push({ url: `https://www.instagram.com/${m.product_type === "clips" ? "reel" : "p"}/${m.code}/`,
-              type: m.product_type === "clips" ? "reel" : m.media_type === 8 ? "carousel" : m.media_type === 2 ? "video" : "photo",
-              author: m.user && m.user.username, taken_at: m.taken_at, likes: m.like_count, comments: m.comment_count,
-              views: m.play_count || m.view_count || "", caption: m.caption && m.caption.text });
-          }
-          for (const k in o) if (k !== "media") walk(o[k]);
-        })(obj);
-      };
-      for (let guard = 0; guard < 30 && rows.length < limit; guard++) {
-        const body = new URLSearchParams({ tab: "top", surface: "grid", ...(maxId ? { max_id: maxId, page: String(page) } : {}) });
-        const r = await fetch(`https://www.instagram.com/api/v1/tags/${encodeURIComponent(tag)}/sections/`, { method: "POST", credentials: "include", body,
-          headers: { "x-ig-app-id": APP_ID, "x-csrftoken": csrf, "x-requested-with": "XMLHttpRequest", "content-type": "application/x-www-form-urlencoded" } });
-        if (!r.ok) break;
-        const d = await r.json();
-        take(d.sections);
-        progress(rows.length, Math.min(limit, total || limit), `${rows.length.toLocaleString()} posts for #${tag}…`);
-        if (!d.more_available || !d.next_max_id) break;
-        maxId = d.next_max_id; page = d.next_page || page + 1;
-        await pace();
-      }
-      return { rows: rows.slice(0, limit), owner: "tag-" + tag, note: total ? `#${tag} has ${Number(total).toLocaleString()} posts in total; these are its top posts.` : "" };
-    }
-
-    if (mode === "unfollowers") {
-      const uid = (document.cookie.match(/(?:^|; )ds_user_id=([^;]+)/) || [])[1];
-      async function all(kind) {
-        const out = [];
-        let maxId = null, guard = 0;
-        do {
-          const q = "count=100" + (kind === "followers" ? "&search_surface=follow_list_page" : "") + (maxId ? `&max_id=${encodeURIComponent(maxId)}` : "");
-          const d = await api(`/api/v1/friendships/${uid}/${kind}/?${q}`);
-          for (const u of d.users || []) out.push(u);
-          progress(out.length, 0, `Reading your ${kind}: ${out.length.toLocaleString()}…`);
-          maxId = d.next_max_id || null;
-          if (maxId) await pace();
-        } while (maxId && ++guard < 300);
-        return out;
-      }
-      const following = await all("following");
-      const followers = await all("followers");
-      const fset = new Set(followers.map((u) => u.username));
-      const rows = following.filter((u) => !fset.has(u.username))
-        .map((u) => ({ username: u.username, full_name: u.full_name, verified: !!u.is_verified, status: "doesn't follow you back" }));
-      return { rows, owner: "me", followers: followers.map((u) => ({ username: u.username, full_name: u.full_name, verified: !!u.is_verified })),
-               note: `You follow ${following.length.toLocaleString()} accounts and have ${followers.length.toLocaleString()} followers.` };
-    }
-
-    if (mode === "suggested") {
-      const m = String(value).match(/instagram\.com\/([^/?#]+)/) || String(value).match(/@?([\w.]+)/);
-      const username = m && m[1].replace(/^@/, "");
-      if (!username) return { error: "Enter a profile URL or @handle." };
-      const found = await api(`/web/search/topsearch/?query=${encodeURIComponent(username)}&context=blended`);
-      const hit = (found.users || []).map((x) => x.user).find((u) => (u.username || "").toLowerCase() === username.toLowerCase());
-      if (!hit) return { error: "Profile not found." };
-      const d = await api(`/api/v1/discover/chaining/?target_id=${hit.pk || hit.id}`);
-      const rows = (d.users || []).slice(0, limit).map((u) => ({ username: u.username, full_name: u.full_name,
-        verified: !!u.is_verified, private: !!u.is_private }));
-      return { rows, owner: username + "-suggested" };
-    }
-
-    if (mode === "followers" || mode === "following") {
-      const m = String(value).match(/instagram\.com\/([^/?#]+)/) || String(value).match(/@?([\w.]+)/);
-      const username = m && m[1].replace(/^@/, "");
-      if (!username) return { error: "Enter a profile URL or @handle." };
-      const found = await api(`/web/search/topsearch/?query=${encodeURIComponent(username)}&context=blended`);
-      const hit = (found.users || []).map((x) => x.user).find((u) => (u.username || "").toLowerCase() === username.toLowerCase());
-      if (!hit) return { error: "Profile not found." };
-      const uid = hit.pk || hit.id;
-      const rows = [];
-      let maxId = null, guard = 0;
-      do {
-        const q = `count=50` + (mode === "followers" ? "&search_surface=follow_list_page" : "") + (maxId ? `&max_id=${encodeURIComponent(maxId)}` : "");
-        const d = await api(`/api/v1/friendships/${uid}/${mode}/?${q}`);
-        for (const u of d.users || []) rows.push({ username: u.username, full_name: u.full_name, verified: !!u.is_verified, private: !!u.is_private });
-        progress(rows.length, limit, `${rows.length.toLocaleString()} ${mode === "followers" ? "followers" : "accounts"}…`);
-        maxId = d.next_max_id || null;
-        if (maxId) await pace();
-      } while (maxId && rows.length < limit && ++guard < 400);
-      return { rows: rows.slice(0, limit), owner: username };
-    }
-
-    // one post -> list of downloadable files
-    const filesOf = (it, user, kind) => {
-      const day = it.taken_at ? new Date(it.taken_at * 1000).toISOString().slice(0, 10) : "";
-      return (it.carousel_media || [it]).map((p, i, arr) => {
-        const video = (p.video_versions || [])[0];
-        const img = ((p.image_versions2 || {}).candidates || [])[0];
-        const id = it.code || String(it.pk || it.id || "").split("_")[0];
-        const ext = video ? "mp4" : "jpg";
-        return { is_video: !!video, url: video ? video.url : img && img.url, thumb: img && img.url, kind,
-          key: `${kind}:${id}:${i}`, name: `${user}/${kind}/${day}_${id}${arr.length > 1 ? "_" + (i + 1) : ""}.${ext}` };
-      }).filter((x) => x.url);
-    };
-
-    if (mode === "dllinks") {
-      const codes = [...new Set((String(value).match(/\/(?:p|reel|reels|tv)\/[A-Za-z0-9_-]+/g) || []).map(codeOf))];
-      if (!codes.length) return { error: "Paste one or more post / reel links." };
-      const rows = [];
-      for (const [n, code] of codes.entries()) {
-        try {
-          const it = ((await api(`/api/v1/media/${shortcodeToPk(code)}/info/`)).items || [])[0];
-          if (it) rows.push(...filesOf(it, (it.user && it.user.username) || "links", it.product_type === "clips" ? "reels" : "posts"));
-        } catch (e) { if (/rate-limiting/.test(e.message)) break; }
-        progress(n + 1, codes.length, `Link ${n + 1} of ${codes.length}…`);
-        if (n < codes.length - 1) await pace();
-      }
-      return { rows, owner: "links" };
-    }
-
-    if (mode === "dlprofile") {
-      const m = String(value).match(/instagram\.com\/([^/?#]+)/) || String(value).match(/@?([\w.]+)/);
-      const username = m && m[1].replace(/^@/, "");
-      if (!username) return { error: "Enter a profile URL or @handle." };
-      const onProfile = location.pathname.toLowerCase().replace(/\/+$/, "").split("/")[1] === username.toLowerCase();
-      if (!onProfile) return { navigate: `https://www.instagram.com/${username}/` };
-      const o = opts || { posts: true, stories: true, highlights: true };
-      const rows = [];
-      const found = await api(`/web/search/topsearch/?query=${encodeURIComponent(username)}&context=blended`);
-      const hit = (found.users || []).map((x) => x.user).find((u) => (u.username || "").toLowerCase() === username.toLowerCase());
-      const uid = hit && (hit.pk || hit.id);
-      const hlIds = [...new Set([...document.querySelectorAll('a[href*="/stories/highlights/"]')]
-        .map((a) => (a.getAttribute("href").match(/highlights\/(\d+)/) || [])[1]).filter(Boolean))];
-      if (o.stories && uid) {
-        progress(0, 0, "Reading stories…");
-        const d = await api(`/api/v1/feed/reels_media/?reel_ids=${uid}`);
-        for (const reel of d.reels_media || []) for (const it of reel.items || []) rows.push(...filesOf(it, username, "stories"));
-        await pace();
-      }
-      if (o.highlights && hlIds.length) {
-        for (let i = 0; i < hlIds.length; i += 5) {
-          const q = hlIds.slice(i, i + 5).map((h) => "reel_ids=highlight:" + h).join("&");
-          const d = await api(`/api/v1/feed/reels_media/?${q}`);
-          for (const reel of Object.values(d.reels || {}).concat(d.reels_media || [])) {
-            for (const it of reel.items || []) {
-              const f = filesOf(it, username, "highlights");
-              for (const x of f) if (!rows.some((r) => r.key === x.key)) rows.push(x);
-            }
-          }
-          progress(Math.min(i + 5, hlIds.length), hlIds.length, `Highlights ${Math.min(i + 5, hlIds.length)} of ${hlIds.length}…`);
-          await pace();
-        }
-      }
-      if (o.posts) {
-        const codes = [], seen = new Set();
-        let idle = 0;
-        while (codes.length < limit && idle < 5) {
-          const before = codes.length;
-          for (const a of document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]')) {
-            const c = codeOf(a.getAttribute("href"));
-            if (c && !seen.has(c)) { seen.add(c); codes.push(c); }
-          }
-          progress(Math.min(codes.length, limit), limit, `Found ${Math.min(codes.length, limit).toLocaleString()} posts & reels…`);
-          idle = codes.length === before ? idle + 1 : 0;
-          window.scrollTo(0, document.body.scrollHeight);
-          await sleep(1300);
-        }
-        window.scrollTo(0, 0);
-        const pick = codes.slice(0, limit);
-        for (const [n, code] of pick.entries()) {
-          try {
-            const it = ((await api(`/api/v1/media/${shortcodeToPk(code)}/info/`)).items || [])[0];
-            if (it) rows.push(...filesOf(it, username, it.product_type === "clips" ? "reels" : "posts"));
-          } catch (e) { if (/rate-limiting/.test(e.message)) { if (rows.length) break; throw e; } }
-          progress(n + 1, pick.length, `Post ${n + 1} of ${pick.length} · ${rows.length.toLocaleString()} files…`);
-          await pace();
-        }
-      }
-      return { rows, owner: username };
-    }
-
-    // media
-    const code = codeOf(value);
-    if (!code) return { error: "That doesn't look like a post or reel link." };
-    const info = await api(`/api/v1/media/${shortcodeToPk(code)}/info/`);
-    const item = (info.items || [])[0];
-    if (!item) return { error: "Post not found." };
-    const parts = item.carousel_media || [item];
-    const rows = parts.map((p) => {
-      const video = (p.video_versions || [])[0];
-      const img = ((p.image_versions2 || {}).candidates || [])[0];
-      return { is_video: !!video, url: video ? video.url : img && img.url, thumb: img && img.url };
-    }).filter((x) => x.url);
-    return { rows, owner: item.user && item.user.username };
+    return { error: "Unknown export type." };
   } catch (e) {
     return { error: e && e.message ? e.message : String(e) };
   }
 }
 
-// --- Export builders -------------------------------------------------------
+// --- CSV + download --------------------------------------------------------
 
 function csvCell(v) {
   if (v === null || v === undefined) return "";
@@ -745,647 +313,26 @@ function buildCsv() {
   return "﻿" + header + "\r\n" + lines.join("\r\n");
 }
 
-function buildJson() {
-  const cols = MODES[mode].columns;
-  return JSON.stringify(rows.map((r) => Object.fromEntries(cols.map((c) => [c[0], c[1](r) ?? null]))), null, 2);
-}
-
-let transcriptTitle = "";
-let allRows = [];
-const _num = (v) => Number(String(v == null ? 0 : v).replace(/[^0-9.]/g, "")) || 0;
-function applyRowFilter() {
-  const kw = $("rfKw").value.trim().toLowerCase();
-  const type = $("rfType").value, sort = $("rfSort").value;
-  const minV = _num($("rfViews").value), minL = _num($("rfLikes").value);
-  let r = allRows.filter((x) => {
-    if (type && (x.type || "") !== type) return false;
-    if (minV && _num(x.views) < minV) return false;
-    if (minL && _num(x.likes) < minL) return false;
-    if (kw && !String(x.caption || "").toLowerCase().includes(kw)) return false;
-    return true;
-  });
-  if (sort) r = [...r].sort((a, b) => _num(b[sort]) - _num(a[sort]));
-  rows = r;
-  $("rowCount").textContent = rows.length.toLocaleString();
-  $("rfCount").innerHTML = `Showing <b>${rows.length.toLocaleString()}</b> of ${allRows.length.toLocaleString()} (CSV/JSON export the filtered list)`;
-}
-function buildTxt() {
-  return (transcriptTitle ? transcriptTitle + "\n\n" : "") + rows.map((r) => `[${r.start}] ${r.text}`).join("\n");
-}
-function buildSrt() {
-  const ts = (x) => { const h = Math.floor(x / 3600), m = Math.floor(x % 3600 / 60), s = Math.floor(x % 60);
-    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")},000`; };
-  return rows.map((r, i) => `${i + 1}\n${ts(r.seconds || 0)} --> ${ts(rows[i + 1] ? rows[i + 1].seconds : (r.seconds || 0) + 4)}\n${r.text}\n`).join("\n");
-}
-
-function download(text, type, ext) {
-  const blob = new Blob([text], { type });
+function autoDownload() {
+  const blob = new Blob([buildCsv()], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const stamp = new Date().toISOString().slice(0, 10);
-  chrome.downloads.download({ url, filename: `instagram-${handleForName}-${mode}-${stamp}.${ext}`, saveAs: true }, () => {
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
-  });
+  chrome.downloads.download(
+    { url, filename: `instagram-${handleForName}-${mode}-${stamp}.csv`, saveAs: false },
+    () => setTimeout(() => URL.revokeObjectURL(url), 60000)
+  );
 }
 
-// --- Media -----------------------------------------------------------------
+// --- Wiring ----------------------------------------------------------------
 
-function downloadMedia(item, i) {
-  if (!item || !item.url) return;
-  chrome.downloads.download({ url: item.url, conflictAction: "uniquify",
-    filename: item.name ? `instagram/${item.name}` : `instagram-${handleForName}-${i + 1}.${item.is_video ? "mp4" : "jpg"}` });
-}
-
-function dlOptions() {
-  return { posts: $("dlPosts").checked, stories: $("dlStories").checked, highlights: $("dlHl").checked };
-}
-
-// Bulk download runs in the background worker, so it keeps going if the panel is closed.
-async function downloadAll() {
-  const items = rows.filter((r) => r.url).map((r, i) => ({ url: r.url,
-    filename: r.name ? `instagram/${r.name}` : `instagram-${handleForName}-${i + 1}.${r.is_video ? "mp4" : "jpg"}` }));
-  $("dlAllMedia").disabled = true;
-  chrome.runtime.sendMessage({ igxBulk: { items } });
-  if (mode === "dlprofile") {
-    const key = "igxDl_" + handleForName.toLowerCase();
-    const done = ((await chrome.storage.local.get(key))[key]) || [];
-    await chrome.storage.local.set({ [key]: [...new Set(done.concat(rows.map((r) => r.key).filter(Boolean)))].slice(-20000) });
-  }
-}
 chrome.runtime.onMessage.addListener((msg) => {
-  if (!msg || !msg.igxBulkProgress) return;
-  const { n, total, failed } = msg.igxBulkProgress;
-  $("dlBar").hidden = false;
-  $("dlBarFill").style.width = Math.round((n / total) * 100) + "%";
-  $("dlBarTx").textContent = n >= total ? `✅ Downloaded ${total - failed} of ${total} files to Downloads/instagram/` : `Downloading ${n} / ${total}…`;
-  if (n >= total) $("dlAllMedia").disabled = false;
+  if (msg && msg.igxProgress && msg.igxProgress.text) setStatus(msg.igxProgress.text, "run");
 });
 
-function renderMedia(items) {
-  const list = $("mediaList");
-  list.innerHTML = "";
-  const kinds = {};
-  items.forEach((it) => { kinds[it.kind || "files"] = (kinds[it.kind || "files"] || 0) + 1; });
-  $("dlKinds").innerHTML = Object.entries(kinds).map(([k, n]) =>
-    `<span><b>${n.toLocaleString()}</b> ${k}</span>`).join("");
-  $("dlKinds").hidden = Object.keys(kinds).length < 2 && !items[0].kind;
-  $("dlBar").hidden = true;
-  $("dlAllMedia").textContent = items.length > 1 ? `⬇ Download all ${items.length.toLocaleString()} files` : "Download";
-  items.slice(0, 60).forEach((item, i) => {
-    const cell = document.createElement("div");
-    cell.className = "mcell";
-    cell.innerHTML =
-      `<div class="mthumb">` + (item.thumb ? `<img loading="lazy" src="${escapeHtml(item.thumb)}" alt="">` : "") +
-      `<span class="mbadge">${item.is_video ? "▶ video" : "photo"}</span></div>` +
-      `<button class="btn mdl">Download ${item.is_video ? "video" : "photo"}</button>`;
-    cell.querySelector(".mdl").addEventListener("click", () => downloadMedia(item, i));
-    list.appendChild(cell);
-  });
-  $("mediaCount").textContent = items.length.toLocaleString();
-  $("mediaNoun").textContent = items.length === 1 ? "file" : "files";
-  $("dlAllMedia").hidden = items.length < 2;
-  if (items.length > 60) list.insertAdjacentHTML("beforeend", `<p class="chat-sub" style="grid-column:1/-1">Showing 60 of ${items.length.toLocaleString()}. "Download all" saves every file.</p>`);
-  $("mediaResult").hidden = false;
-}
-
-// --- Influencer search (hammadi.dev database) ----------------------------------
-let infTimer, infSeq = 0;
-const infFilters = () => ({ q: $("infQ").value.trim(), platform: $("infPlat").value, country: $("infCountry").value,
-  min_followers: $("infMin").value, max_followers: $("infMax").value });
-const fmtK = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "K" : String(n || 0);
-async function infQuote() {
-  const my = ++infSeq;
-  $("infTotal").textContent = "Searching…";
-  try {
-    const r = await hd("/public/v1/influencer-order/quote", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(infFilters()) });
-    const d = await r.json();
-    if (my !== infSeq) return;
-    const total = d.total || 0;
-    $("infTotal").innerHTML = total ? `<b>${total.toLocaleString()}</b> influencers match` : "Nothing matches yet. Try a broader niche or another country.";
-    $("infList").innerHTML = (d.preview || []).map((x) => `<div class="ai-item"><b>@${escapeHtml(x.username)}</b> <span class="c">· ${fmtK(x.followers)} followers${x.country ? " · " + escapeHtml(x.country) : ""}${x.engagement_rate ? " · " + (Number(x.engagement_rate) < 1 ? (Number(x.engagement_rate) * 100).toFixed(1) + "%" : escapeHtml(String(x.engagement_rate))) + " engagement" : ""}</span></div>`).join("");
-    const sizes = [];
-    for (const t of d.tiers || []) {
-      if (t.count <= total) sizes.push({ count: t.count, cents: t.price_cents });
-      else { if (total > 0 && !sizes.some((x) => x.count === total)) sizes.push({ count: total, cents: t.price_cents, all: true }); break; }
-    }
-    $("infBuy").innerHTML = sizes.map((x) => `<button data-n="${x.count}"><b>$${(x.cents / 100).toFixed(x.cents % 100 ? 2 : 0)}</b>${x.all ? "All " : ""}${x.count.toLocaleString()} influencers</button>`).join("");
-    $("infBuy").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => infBuy(Number(b.dataset.n), b)));
-  } catch (_) { if (my === infSeq) $("infTotal").textContent = "Couldn't reach hammadi.dev. Try again."; }
-}
-async function infBuy(n, btn) {
-  btn.disabled = true;
-  try {
-    const r = await hd("/public/v1/influencer-order", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...infFilters(), count: n }) });
-    const d = await r.json();
-    if (!r.ok || !d.url) throw new Error((d.detail && (d.detail.error || d.detail)) || "Checkout failed.");
-    chrome.tabs.create({ url: d.url });
-  } catch (e) { $("infTotal").textContent = String(e.message || e); }
-  finally { btn.disabled = false; }
-}
-
-// --- Search inside comments (Instagram has none) ------------------------------
-let srchTimer;
-async function doSearch() {
-  const q = $("srchQ").value.trim().toLowerCase();
-  const list = $("srchList");
-  if (!q) { list.innerHTML = ""; $("srchN").textContent = ""; $("srchNav").hidden = true; sendHighlight(""); return; }
-  let hits;
-  hits = rows.filter((r) => String(r.text || "").toLowerCase().includes(q) || String(r.author || "").toLowerCase().includes(q));
-  $("srchN").textContent = `${hits.length.toLocaleString()} match${hits.length === 1 ? "" : "es"}`;
-  list.innerHTML = hits.slice(0, 60).map((r) => {
-    const t = escapeHtml(String(r.text || "").slice(0, 200)).replace(new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), (m) => `<mark>${m}</mark>`);
-    return `<div class="ai-item"><b>@${escapeHtml(r.author || "")}</b> <span class="c">· ${Number(String(r.likes).replace(/\D/g, "")) || 0} likes</span><div class="r">${t}</div></div>`;
-  }).join("") + (hits.length > 60 ? `<p class="chat-sub">…and ${hits.length - 60} more (they're all in the CSV).</p>` : "");
-  sendHighlight(q);
-}
-async function searchNav(dir) {
-  try { const tab = await findInstagramTab(); if (tab) chrome.tabs.sendMessage(tab.id, { igxSearchNav: dir }).catch(() => {}); } catch (_) {}
-}
-async function sendHighlight(q) {
-  try { const tab = await findInstagramTab(); if (tab) chrome.tabs.sendMessage(tab.id, { igxSearch: q }).catch(() => {}); } catch (_) {}
-}
-
-// --- Comment insights (local, no API key) ------------------------------------
-const POS_W = /\b(love|loved|lovely|amazing|awesome|beautiful|gorgeous|great|perfect|best|cute|obsessed|wow|incredible|fantastic|nice|good|stunning|fire|queen|yes|need|want|thank|thanks|excellent|happy|favorite|favourite|adorable|wonderful|bonito|bonita|hermoso|hermosa|me encanta|encanta|precioso|genial|gracias|lindo|linda|belle|beau|magnifique|super|j'adore|merci|top|lindo|maravilhoso|amei|obrigad[oa]|perfeito|incrível|schön|toll|liebe|danke|bellissim[oa]|grazie|harika|güzel|bayıldım)\b/gi;
-const NEG_W = /\b(hate|bad|worst|ugly|terrible|awful|scam|fake|disappointed|disappointing|overpriced|expensive|broke|broken|never|boring|trash|horrible|sad|cringe|gross|no|not|don't|dont|stop|wrong|poor|refund|malo|mala|feo|fea|caro|estafa|horrible|nul|nulle|cher|arnaque|décevant|ruim|caro|horrível|schlecht|teuer|brutto|costoso|kötü|pahalı)\b/gi;
-const POS_E = /[😍❤️🥰😘💕💖💗💯🔥👏🙌✨😊😁🤩💪👍😻💜💙💚🧡🤍💛🫶]/gu;
-const NEG_E = /[😡🤬👎🤮😒💔😤🙄😞😢😭🤢]/gu;
-const STOP = new Set("the a an and or but to of in on for with is are was it this that i you he she we they my your me so be at as do not just have has had what when how all can its from will would there their them our out up get got like very really more one too also about here then than some any been did does am im dont amp que de la el en y los las un una por para con es lo le les des et du je tu il elle pas est o os as da do e um uma não com para mas ich du und der die das ist nicht ein eine il la di che e per non".split(" "));
-function sentimentOf(t) {
-  const p = (t.match(POS_W) || []).length + (t.match(POS_E) || []).length;
-  const n = (t.match(NEG_W) || []).length * 1.2 + (t.match(NEG_E) || []).length * 1.5;
-  return p > n ? "positive" : n > p ? "negative" : "neutral";
-}
-function renderInsights() {
-  const texts = rows.map((r) => String(r.text || "")).filter((t) => t.trim());
-  if (!texts.length) { $("ins").hidden = true; return; }
-  const c = { positive: 0, neutral: 0, negative: 0 };
-  const words = {}, emo = {};
-  let questions = 0, buyers = 0;
-  for (const t of texts) {
-    c[sentimentOf(t)]++;
-    if (t.includes("?")) questions++;
-    if (/price|how much|link|where (can|do|to) (i )?(buy|get)|cu[aá]nto|precio|d[oó]nde|prix|combien|quanto|preço|ship|env[ií]o/i.test(t)) buyers++;
-    for (const w of t.toLowerCase().replace(/@[\w.]+/g, " ").match(/[\p{L}']{3,}/gu) || []) if (!STOP.has(w)) words[w] = (words[w] || 0) + 1;
-    for (const e of t.match(/\p{Extended_Pictographic}/gu) || []) emo[e] = (emo[e] || 0) + 1;
-  }
-  const tot = texts.length, pct = (k) => Math.round((c[k] * 100) / tot);
-  $("insPos").style.width = pct("positive") + "%"; $("insNeu").style.width = pct("neutral") + "%"; $("insNeg").style.width = pct("negative") + "%";
-  $("insPct").innerHTML = `<b style="color:#16a34a">${pct("positive")}% positive</b> · ${pct("neutral")}% neutral · <b style="color:#dc2626">${pct("negative")}% negative</b>`;
-  $("insKpi").innerHTML = `<div><b>${tot.toLocaleString()}</b>comments</div><div><b>${questions.toLocaleString()}</b>questions</div><div><b>${buyers.toLocaleString()}</b>want to buy</div>`;
-  const top = Object.entries(words).sort((a, b) => b[1] - a[1]).slice(0, 24);
-  const max = top.length ? top[0][1] : 1;
-  $("insCloud").innerHTML = top.sort(() => Math.random() - 0.5)
-    .map(([w, n]) => `<span title="${n}×" style="font-size:${11 + Math.round((n / max) * 15)}px">${escapeHtml(w)}</span>`).join("");
-  $("insEmo").innerHTML = Object.entries(emo).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([e, n]) => `<span>${e}<small>×${n}</small></span>`).join("");
-  $("ins").hidden = false;
-}
-
-// --- Giveaway picker (fair: crypto random) ----------------------------------
-let gwOwner = "";
-function gwEntries() {
-  const tags = Number($("gwTags").value), kw = $("gwKw").value.trim().toLowerCase();
-  const unique = $("gwUnique").checked, exclOwner = $("gwOwner").checked;
-  const seen = new Set(), out = [];
-  for (const r of rows) {
-    const u = (r.author || "").toLowerCase(), t = r.text || "";
-    if (!u) continue;
-    if (exclOwner && gwOwner && u === gwOwner.toLowerCase()) continue;
-    // Tagging yourself or the post owner doesn't count as tagging a friend.
-    if (tags && new Set((t.match(/@[\w.]{2,30}/g) || []).map((m) => m.slice(1).toLowerCase().replace(/\.$/, ""))
-      .filter((m) => m !== u && m !== (gwOwner || "").toLowerCase())).size < tags) continue;
-    if (kw && !t.toLowerCase().includes(kw)) continue;
-    if (unique) { if (seen.has(u)) continue; seen.add(u); }
-    out.push(r);
-  }
-  return out;
-}
-function gwUpdatePool() {
-  const n = gwEntries().length;
-  $("gwPool").textContent = `${n.toLocaleString()} eligible ${n === 1 ? "entry" : "entries"} out of ${rows.length.toLocaleString()} comments.`;
-}
-function randInt(max) {
-  const a = new Uint32Array(1);
-  const lim = Math.floor(0xffffffff / max) * max;
-  do { crypto.getRandomValues(a); } while (a[0] >= lim);
-  return a[0] % max;
-}
-async function gwPick() {
-  const pool = gwEntries().slice();
-  const want = Math.min(Number($("gwN").value), pool.length);
-  if (!want) { $("gwPool").textContent = "No eligible entries with these rules."; return; }
-  $("gwGo").disabled = true;
-  $("gwRes").hidden = true;
-  const roll = $("gwRoll");
-  roll.hidden = false;
-  for (let i = 0; i < 22; i++) {           // a short shuffle animation
-    roll.textContent = "@" + (pool[randInt(pool.length)].author || "");
-    await new Promise((r) => setTimeout(r, 40 + i * 6));
-  }
-  const winners = [];
-  for (let i = 0; i < want; i++) winners.push(pool.splice(randInt(pool.length), 1)[0]);
-  roll.hidden = true;
-  // Reveal the (first) winner right inside the comments on the page.
-  try {
-    const tab = await findInstagramTab();
-    if (tab) chrome.tabs.sendMessage(tab.id, { igxReveal: winners[0].author }).catch(() => {});
-  } catch (_) {}
-  const stamp = new Date().toLocaleString();
-  const res = $("gwRes");
-  res.innerHTML = winners.map((w, i) => `<div class="gw-win"><b>${want > 1 ? "#" + (i + 1) + " " : "🏆 "}@${escapeHtml(w.author)}</b>`
-    + `<p>“${escapeHtml((w.text || "").slice(0, 160))}”</p><p><a target="_blank" href="https://www.instagram.com/${encodeURIComponent(w.author)}/">Open profile →</a></p></div>`).join("")
-    + `<p class="gw-pool">Drawn at random from ${gwEntries().length.toLocaleString()} eligible entries · ${escapeHtml(stamp)}</p>`
-    + `<div class="gw-acts"><button id="gwAgain" class="btn ghost" type="button">Draw again</button><button id="gwCopy" class="btn ghost" type="button">Copy result</button>`
-    + `<button id="gwCard" class="btn" type="button">Save winner card</button></div>`;
-  res.hidden = false;
-  $("gwGo").disabled = false;
-  $("gwAgain").addEventListener("click", gwPick);
-  $("gwCopy").addEventListener("click", (e) => {
-    navigator.clipboard.writeText(`🎉 Giveaway winner${want > 1 ? "s" : ""}: ${winners.map((w) => "@" + w.author).join(", ")}\n`
-      + `Picked at random from ${gwEntries().length} eligible comments with Comment Exporter (hammadi.dev/extension).`);
-    e.target.textContent = "Copied ✓";
-  });
-  $("gwCard").addEventListener("click", () => gwCardPng(winners, stamp));
-}
-function gwCardPng(winners, stamp) {
-  const c = document.createElement("canvas");
-  c.width = 1080; c.height = 1080;
-  const g = c.getContext("2d");
-  const grad = g.createLinearGradient(0, 0, 1080, 1080);
-  grad.addColorStop(0, "#f58529"); grad.addColorStop(0.55, "#dd2a7b"); grad.addColorStop(1, "#8134af");
-  g.fillStyle = grad; g.fillRect(0, 0, 1080, 1080);
-  g.fillStyle = "#fff"; g.textAlign = "center";
-  g.font = "bold 64px -apple-system, Segoe UI, Roboto, sans-serif";
-  g.fillText(winners.length > 1 ? "Giveaway winners" : "Giveaway winner", 540, 250);
-  g.font = "bold 76px -apple-system, Segoe UI, Roboto, sans-serif";
-  winners.slice(0, 5).forEach((w, i) => g.fillText("@" + w.author, 540, 420 + i * 110));
-  g.font = "32px -apple-system, Segoe UI, Roboto, sans-serif";
-  g.fillText(`Picked at random from ${gwEntries().length.toLocaleString()} eligible comments`, 540, 900);
-  g.font = "26px -apple-system, Segoe UI, Roboto, sans-serif";
-  g.fillText(`${stamp} · hammadi.dev/extension`, 540, 950);
-  c.toBlob((b) => {
-    const url = URL.createObjectURL(b);
-    chrome.downloads.download({ url, filename: `giveaway-winner-${handleForName}.png`, saveAs: true }, () => setTimeout(() => URL.revokeObjectURL(url), 60000));
-  }, "image/png");
-}
-
-// --- AI replies & chat (user's own OpenAI / Claude key, stored locally) -------
-const AI_DEFAULT = { openai: "gpt-4o-mini", anthropic: "claude-haiku-4-5-20251001" };
-let ai = { prov: "openai", key: "", model: "", voice: "" };
-let suggestions = {};
-
-async function aiLoad() {
-  try { ai = { ...ai, ...((await chrome.storage.local.get("igxAi")).igxAi || {}) }; } catch (_) {}
-  $("aiProv").value = ai.prov; $("aiKey").value = ai.key; $("aiModel").value = ai.model; $("aiVoice").value = ai.voice;
-}
-async function aiSave() {
-  ai = { prov: $("aiProv").value, key: $("aiKey").value.trim(), model: $("aiModel").value.trim(), voice: $("aiVoice").value.trim() };
-  await chrome.storage.local.set({ igxAi: ai });
-  $("aiCfg").hidden = true;
-}
-async function llm(system, user, maxTokens = 1200) {
-  return llmChat(system, [{ role: "user", content: user }], maxTokens);
-}
-async function llmChat(system, messages, maxTokens = 1200) {
-  if (!ai.key) { $("aiCfg").hidden = false; $("ai").hidden = false; throw new Error("Add your OpenAI or Claude API key first (⚙ API key)."); }
-  const model = ai.model || AI_DEFAULT[ai.prov];
-  if (ai.prov === "anthropic") {
-    const r = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-api-key": ai.key, "anthropic-version": "2023-06-01",
-                 "anthropic-dangerous-direct-browser-access": "true" },
-      body: JSON.stringify({ model, max_tokens: maxTokens, system, messages }),
-    });
-    const d = await r.json();
-    if (!r.ok) throw new Error((d.error && d.error.message) || `Claude error ${r.status}`);
-    return (d.content || []).map((c) => c.text || "").join("");
-  }
-  const r = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${ai.key}` },
-    body: JSON.stringify({ model, messages: [{ role: "system", content: system }, ...messages] }),
-  });
-  const d = await r.json();
-  if (!r.ok) throw new Error((d.error && d.error.message) || `OpenAI error ${r.status}`);
-  return d.choices[0].message.content || "";
-}
-function pickComments(n) {
-  // Questions and buying intent first, then the most-liked comments.
-  const score = (r) => (/\?/.test(r.text || "") ? 3 : 0) + (/price|how much|link|where|buy|ship|cu[aá]nto|precio|prix|combien/i.test(r.text || "") ? 4 : 0)
-    + Math.log10(1 + (parseInt(String(r.likes).replace(/\D/g, ""), 10) || 0));
-  return rows.map((r, i) => ({ ...r, i })).filter((r) => (r.text || "").trim() && !r.is_reply)
-    .sort((a, b) => score(b) - score(a)).slice(0, n);
-}
-async function aiSuggest() {
-  const btn = $("aiSuggest");
-  btn.disabled = true; btn.textContent = "Writing replies…";
-  try {
-    const picks = pickComments(15);
-    const sys = "You write short, warm, human replies to social media comments on behalf of the account owner. "
-      + "Answer questions helpfully, thank compliments, handle complaints calmly. Max 1-2 sentences, match the comment's language, "
-      + "no hashtags. " + (ai.voice ? `About the account: ${ai.voice}.` : "")
-      + " Return ONLY JSON: [{\"i\": <index>, \"reply\": \"...\"}].";
-    const user = JSON.stringify(picks.map((p) => ({ i: p.i, author: p.author, comment: p.text })));
-    const out = await llm(sys, user);
-    const arr = JSON.parse((out.match(/\[[\s\S]*\]/) || ["[]"])[0]);
-    const list = $("aiList");
-    list.innerHTML = "";
-    for (const it of arr) {
-      const r = rows[it.i];
-      if (!r) continue;
-      suggestions[it.i] = it.reply;
-      const el = document.createElement("div");
-      el.className = "ai-item";
-      el.innerHTML = `<div class="c"><b>@${escapeHtml(r.author || "")}</b>: ${escapeHtml((r.text || "").slice(0, 160))}</div>`
-        + `<div class="r">↳ ${escapeHtml(it.reply)}</div><div class="row"><button class="link cp">Copy reply</button>`
-        + (r.author ? `<a class="link" target="_blank" href="https://www.instagram.com/${encodeURIComponent(r.author)}/">Profile</a>` : "") + `</div>`;
-      el.querySelector(".cp").addEventListener("click", (e) => { navigator.clipboard.writeText(it.reply); e.target.textContent = "Copied ✓"; });
-      list.appendChild(el);
-    }
-    if (!arr.length) list.textContent = "No replies came back, try again.";
-  } catch (e) {
-    $("aiList").textContent = e.message || String(e);
-  } finally {
-    btn.disabled = false; btn.textContent = "Suggest replies to top comments";
-  }
-}
-async function aiAsk() {
-  const q = $("aiQ").value.trim();
-  if (!q) return;
-  const box = $("aiAns");
-  box.hidden = false; box.textContent = "Thinking…";
-  try {
-    const sample = rows.filter((r) => (r.text || "").trim()).slice(0, 400)
-      .map((r) => `- (${r.likes || 0} likes) ${String(r.text).replace(/\s+/g, " ").slice(0, 200)}`).join("\n");
-    box.textContent = await llm("You analyse social media comments for the account owner. Be concrete and short; quote examples.",
-      `Comments (${rows.length} total, up to 400 shown):\n${sample}\n\nQuestion: ${q}`, 900);
-  } catch (e) {
-    box.textContent = e.message || String(e);
-  }
-}
-
-// --- Sentiment colors on the page (content.js does the painting) -------------
-let colored = false;
-async function toggleColor() {
-  const tab = await findInstagramTab();
-  if (!tab) { setStatus("Open an Instagram post/reel or a YouTube video first.", "err"); return; }
-  colored = !colored;
-  try {
-    const r = await chrome.tabs.sendMessage(tab.id, { igxColor: colored });
-    $("colorBtn").textContent = colored ? "✓ Colors on (click to remove)" : "🎨 Color comments on the page";
-    $("colorRes").hidden = !colored;
-    if (colored && r) $("colorRes").textContent = `${r.total} comments colored so far: ${r.positive} positive · ${r.negative} negative · ${r.buyers} buyers. Scroll the comments, new ones get colored too.`;
-  } catch (_) {
-    colored = false;
-    setStatus("Reload the Instagram/YouTube page once, then try again.", "err");
-  }
-}
-
-// --- AI chat about the open page ----------------------------------------------
-let chatCtx = null, chatUrl = "", chatMsgs = [];
-function chatAdd(cls, text) {
-  const d = document.createElement("div");
-  d.className = cls; d.textContent = text;
-  $("chatLog").appendChild(d); $("chatLog").scrollTop = $("chatLog").scrollHeight;
-  return d;
-}
-async function chatContext() {
-  const tab = await findInstagramTab();
-  if (!tab) throw new Error("Open an Instagram profile or reel, or a YouTube video, in a tab first.");
-  if (chatCtx && chatUrl === tab.url) return chatCtx;
-  const yt = /youtube\.com/.test(tab.url);
-  const [res] = await chrome.scripting.executeScript(yt
-    ? { target: { tabId: tab.id }, func: ytxComments, args: [120] }
-    : { target: { tabId: tab.id }, func: igxContext, args: [tab.url] });
-  const out = res && res.result;
-  if (!out || out.error) throw new Error((out && out.error) || "Couldn't read this page.");
-  if (yt) {
-    const title = tab.title.replace(/ - YouTube$/, "");
-    out.kind = "youtube video"; out.summary = { title, url: tab.url, channel: out.owner,
-      comments: (out.rows || []).slice(0, 120).map((r) => `(${r.likes} likes) ${String(r.text).slice(0, 200)}`) };
-  }
-  chatCtx = out; chatUrl = tab.url; chatMsgs = [];
-  return out;
-}
-async function chatAsk() {
-  const q = $("chatQ").value.trim();
-  if (!q) return;
-  $("chatQ").value = "";
-  chatAdd("msg-u", q);
-  const wait = chatAdd("msg-a ctx", chatCtx ? "Thinking…" : "Reading the page in your tab…");
-  try {
-    const ctx = await chatContext();
-    if (!chatMsgs.length) wait.textContent = `Read ${ctx.kind}: ${ctx.label || ""}`;
-    else wait.remove();
-    const system = "You are a sharp social media analyst helping a brand or creator. Use ONLY the page data below; quote numbers "
-      + "and real comments; be concrete and brief (max ~180 words); give a clear verdict when asked for a fit or a decision; "
-      + "say what's missing if the data can't answer. " + (ai.voice ? `The user: ${ai.voice}. ` : "")
-      + "\n\nPAGE DATA (" + ctx.kind + "):\n" + JSON.stringify(ctx.summary).slice(0, 14000);
-    chatMsgs.push({ role: "user", content: q });
-    const ans = await llmChat(system, chatMsgs.slice(-10), 900);
-    chatMsgs.push({ role: "assistant", content: ans });
-    chatAdd("msg-a", ans);
-  } catch (e) {
-    wait.textContent = e.message || String(e);
-  }
-}
-
-// Runs in the Instagram tab: everything the chat needs about a profile or a post.
-async function igxContext(url) {
-  const APP_ID = "936619743392459";
-  const csrf = (document.cookie.match(/(?:^|; )csrftoken=([^;]+)/) || [])[1] || "";
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  async function api(path) {
-    const r = await fetch("https://www.instagram.com" + path, { credentials: "include",
-      headers: { "x-ig-app-id": APP_ID, "x-csrftoken": csrf, "x-requested-with": "XMLHttpRequest", "x-asbd-id": "129477" } });
-    if (!r.ok) throw new Error("Instagram returned " + r.status);
-    return r.json();
-  }
-  const pk = (code) => { const A = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"; let n = 0n;
-    for (const ch of code.slice(0, 11)) n = n * 64n + BigInt(A.indexOf(ch)); return n.toString(); };
-  const post = (it) => ({ type: it.product_type === "clips" ? "reel" : it.media_type === 8 ? "carousel" : it.media_type === 2 ? "video" : "photo",
-    date: it.taken_at ? new Date(it.taken_at * 1000).toISOString().slice(0, 10) : "", likes: it.like_count, comments: it.comment_count,
-    views: it.play_count || it.view_count || null, caption: ((it.caption && it.caption.text) || "").slice(0, 300) });
-  try {
-    if (!/(?:^|; )ds_user_id=/.test(document.cookie)) return { error: "Log in to Instagram in this tab first." };
-    const code = (url.match(/\/(?:p|reel|reels|tv)\/([A-Za-z0-9_-]+)/) || [])[1];
-    if (code) {
-      const it = ((await api(`/api/v1/media/${pk(code)}/info/`)).items || [])[0];
-      if (!it) return { error: "Post not found." };
-      const c = await api(`/api/v1/media/${pk(code)}/comments/?can_support_threading=true&permalink_enabled=false`);
-      let comments = (c.comments || []).map((x) => `(${x.comment_like_count || 0} likes) @${x.user && x.user.username}: ${(x.text || "").slice(0, 200)}`);
-      if (c.next_min_id) { await sleep(700); const c2 = await api(`/api/v1/media/${pk(code)}/comments/?can_support_threading=true&min_id=${encodeURIComponent(c.next_min_id)}`);
-        comments = comments.concat((c2.comments || []).map((x) => `(${x.comment_like_count || 0} likes) @${x.user && x.user.username}: ${(x.text || "").slice(0, 200)}`)); }
-      return { kind: "Instagram post/reel", label: "@" + (it.user && it.user.username), summary: { url, owner: it.user && it.user.username, ...post(it), comments: comments.slice(0, 120) } };
-    }
-    const username = (url.match(/instagram\.com\/([^/?#]+)/) || [])[1];
-    if (!username) return { error: "Open a profile, post or reel." };
-    const found = await api(`/web/search/topsearch/?query=${encodeURIComponent(username)}&context=blended`);
-    const hit = (found.users || []).map((x) => x.user).find((u) => (u.username || "").toLowerCase() === username.toLowerCase());
-    if (!hit) return { error: "Profile not found." };
-    let info = {};
-    try { info = (await api(`/api/v1/users/${hit.pk || hit.id}/info/`)).user || {}; } catch (_) {}
-    const codes = [...new Set([...document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]')]
-      .map((a) => (a.getAttribute("href").match(/\/(?:p|reel)\/([A-Za-z0-9_-]+)/) || [])[1]).filter(Boolean))].slice(0, 9);
-    const posts = [];
-    for (const cd of codes) { try { const it = ((await api(`/api/v1/media/${pk(cd)}/info/`)).items || [])[0]; if (it) posts.push(post(it)); } catch (_) {} await sleep(600); }
-    // Fallback when the info endpoint is refused: the profile page's own meta
-    // description ("1.2M Followers, 300 Following, 900 Posts - ...").
-    const num = (x) => { if (!x) return null; const m = String(x).replace(/,/g, "").match(/([\d.]+)\s*([KkMm]?)/); if (!m) return null;
-      return Math.round(parseFloat(m[1]) * (m[2].toLowerCase() === "m" ? 1e6 : m[2].toLowerCase() === "k" ? 1e3 : 1)); };
-    if (!info.follower_count) {
-      try {
-        const html = await (await fetch(`https://www.instagram.com/${username}/`, { credentials: "include" })).text();
-        const meta = (html.match(/<meta[^>]+name="description"[^>]+content="([^"]+)"/) || html.match(/<meta[^>]+property="og:description"[^>]+content="([^"]+)"/) || [])[1] || "";
-        const d = meta.replace(/&#064;/g, "@").replace(/&amp;/g, "&");
-        info.follower_count = num((d.match(/([\d.,]+\s*[KkMm]?)\s+Followers/) || [])[1]);
-        info.following_count = num((d.match(/([\d.,]+\s*[KkMm]?)\s+Following/) || [])[1]);
-        info.media_count = num((d.match(/([\d.,]+\s*[KkMm]?)\s+Posts/) || [])[1]);
-        const bio = (html.match(/"biography":"((?:[^"\\]|\\.)*)"/) || [])[1];
-        if (bio) info.biography = JSON.parse(`"${bio}"`);
-      } catch (_) {}
-    }
-    const followers = info.follower_count || hit.follower_count || null;
-    const avgEng = posts.length && followers ? (posts.reduce((a, p) => a + (p.likes || 0) + (p.comments || 0), 0) / posts.length / followers * 100).toFixed(2) + "%" : null;
-    return { kind: "Instagram profile", label: "@" + username, summary: { username, full_name: info.full_name || hit.full_name, bio: info.biography || "",
-      category: info.category || info.category_name || "", followers, following: info.following_count, posts_total: info.media_count,
-      verified: !!(info.is_verified || hit.is_verified), business: !!info.is_business, website: info.external_url || "",
-      avg_engagement_recent: avgEng, recent_posts: posts } };
-  } catch (e) {
-    return { error: e && e.message ? e.message : String(e) };
-  }
-}
-
-// --- Account: 1 free export, then Pro ($3/month) ----------------------------
-// Only the licence check talks to hammadi.dev; scraped data never leaves the tab.
-const HD = "https://hammadi.dev";
-let acct = null;
-let token = "";
-let authMode = "signup";
-
-async function hd(path, opts = {}) {
-  // Session token kept by the extension (sign-up/login happen in the panel); the
-  // hammadi.dev cookie still works as a fallback for people logged in on the site.
-  if (!token) { try { token = (await chrome.storage.local.get("igxToken")).igxToken || ""; } catch (_) {} }
-  const headers = { ...(opts.headers || {}), ...(token ? { authorization: `Bearer ${token}` } : {}) };
-  return fetch(`${HD}${path}`, { ...opts, headers, credentials: "include" });
-}
-
-async function loadAccount() {
-  // Standalone build: no backend, no login, no payment — everything runs free in
-  // the user's own tab.
-  const el = $("acct");
-  if (el) el.innerHTML = '<span>✓ Free · runs in your own tab</span>';
-  const ab = $("authBox"); if (ab) ab.hidden = true;
-}
-
-function setAuthMode(m) {
-  authMode = m;
-  document.querySelectorAll(".auth-tabs button").forEach((b) => b.classList.toggle("on", b.dataset.a === m));
-  $("authGo").textContent = m === "signup" ? "Create account & get 1 free export" : "Log in";
-  $("authPw").autocomplete = m === "signup" ? "new-password" : "current-password";
-  $("authErr").hidden = true;
-}
-
-async function doAuth(e) {
-  e.preventDefault();
-  const email = $("authEmail").value.trim(), password = $("authPw").value;
-  $("authGo").disabled = true; $("authErr").hidden = true;
-  try {
-    let body;
-    if (authMode === "signup") {
-      const base = (email.split("@")[0] || "user").toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 18) || "user";
-      body = { email, password, username: base + Math.floor(100 + Math.random() * 900) };
-    } else {
-      body = { identifier: email, password };
-    }
-    const r = await fetch(`${HD}/auth/${authMode}`, { method: "POST", credentials: "include",
-      headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok || !d.token) throw new Error((typeof d.detail === "string" && d.detail) || (d.detail && d.detail[0] && d.detail[0].msg) || "Couldn't sign you in.");
-    token = d.token;
-    await chrome.storage.local.set({ igxToken: token });
-    await loadAccount();
-  } catch (err) {
-    $("authErr").textContent = err.message || String(err); $("authErr").hidden = false;
-  } finally {
-    $("authGo").disabled = false;
-  }
-}
-
-async function goPro() {
-  try {
-    const r = await hd("/public/v1/ext/checkout", { method: "POST" });
-    const d = await r.json();
-    if (d.url) chrome.tabs.create({ url: d.url });   // straight to Stripe checkout
-    else setStatus((d.detail && d.detail.error) || "Log in first.", "err");
-  } catch (_) {
-    setStatus("Can't reach hammadi.dev right now.", "err");
-  }
-}
-
-// Before an export: logged in and (Pro or a free export left)? The free export
-// is only spent after an export succeeds (markUsed), so a failure costs nothing.
-async function allowExport() {
-  return true;
-}
-
-async function markUsed() {
-  /* standalone: nothing to meter */
-}
-
-// --- Wire up ---------------------------------------------------------------
-
-function wire() {
-  const qp = new URLSearchParams(location.search);
-  if (qp.get("inpage")) document.documentElement.classList.add("inpage");
-  if (qp.get("mode") && MODES[qp.get("mode")]) { mode = qp.get("mode"); }
-  $("modeSel").addEventListener("change", () => {
-    mode = $("modeSel").value;
-    if (mode === "ytsearch") setSite("youtube");
-    else if (site === "youtube" && mode !== "comments") setSite("instagram");
-    $("target").value = "";
-    applyMode();
-    prefillFromTab(true);
-  });
+document.addEventListener("DOMContentLoaded", () => {
+  $("modeSel").addEventListener("change", applyMode);
   $("run").addEventListener("click", run);
-  $("target").addEventListener("keydown", (e) => { if (e.key === "Enter") run(); });
-  $("dlCsv").addEventListener("click", () => download(buildCsv(), "text/csv;charset=utf-8", "csv"));
-  $("dlJson").addEventListener("click", () => download(buildJson(), "application/json", "json"));
-  $("dlTxt").addEventListener("click", () => download(buildTxt(), "text/plain;charset=utf-8", "txt"));
-  $("dlSrt").addEventListener("click", () => download(buildSrt(), "text/plain;charset=utf-8", "srt"));
-  $("dlAllMedia").addEventListener("click", downloadAll);
-  ["gwTags", "gwKw", "gwUnique", "gwOwner"].forEach((id) => $(id).addEventListener(id === "gwKw" ? "input" : "change", gwUpdatePool));
-  $("gwGo").addEventListener("click", gwPick);
-  document.querySelectorAll(".auth-tabs button").forEach((b) => b.addEventListener("click", () => setAuthMode(b.dataset.a)));
-  $("authBox").addEventListener("submit", doAuth);
-  $("colorBtn").addEventListener("click", toggleColor);
-  $("srchQ").addEventListener("input", () => { clearTimeout(srchTimer); srchTimer = setTimeout(doSearch, 150); });
-  ["rfKw", "rfViews", "rfLikes"].forEach((id) => $(id).addEventListener("input", applyRowFilter));
-  ["rfType", "rfSort"].forEach((id) => $(id).addEventListener("change", applyRowFilter));
-  $("srchPrev").addEventListener("click", () => searchNav("prev"));
-  $("srchNext").addEventListener("click", () => searchNav("next"));
-  chrome.runtime.onMessage.addListener((msg) => {
-    if (msg && msg.igxSearchCount) {
-      const { total, index } = msg.igxSearchCount;
-      $("srchNav").hidden = total <= 0;
-      $("srchPos").textContent = (total ? (index + 1) : 0) + " / " + total;
-      $("srchPrev").disabled = $("srchNext").disabled = total <= 1;
-    }
-  });
-  ["infQ", "infPlat", "infCountry", "infMin", "infMax"].forEach((id) => $(id).addEventListener(id === "infQ" ? "input" : "change", () => { clearTimeout(infTimer); infTimer = setTimeout(infQuote, 400); }));
-  $("chatAsk").addEventListener("click", chatAsk);
-  $("chatQ").addEventListener("keydown", (e) => { if (e.key === "Enter") chatAsk(); });
-  $("chatCfg").addEventListener("click", () => { $("ai").hidden = false; $("aiCfg").hidden = false; $("ai").scrollIntoView({ behavior: "smooth" }); });
-  $("aiCfgBtn").addEventListener("click", () => { $("aiCfg").hidden = !$("aiCfg").hidden; });
-  $("aiSave").addEventListener("click", aiSave);
-  $("aiSuggest").addEventListener("click", aiSuggest);
-  $("aiAsk").addEventListener("click", aiAsk);
-  $("aiQ").addEventListener("keydown", (e) => { if (e.key === "Enter") aiAsk(); });
-  aiLoad();
+  $("dlAgain").addEventListener("click", () => { if (rows.length) autoDownload(); });
   applyMode();
-  prefillFromTab(!!(qp.get("mode") && MODES[qp.get("mode")]));
-  loadAccount();
-}
-
-if (document.readyState !== "loading") wire();
-else document.addEventListener("DOMContentLoaded", wire);
+  prefillFromTab();
+});
