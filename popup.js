@@ -889,21 +889,6 @@ async function doSearch() {
   const list = $("srchList");
   if (!q) { list.innerHTML = ""; $("srchN").textContent = ""; $("srchNav").hidden = true; sendHighlight(""); return; }
   let hits;
-  if ($("srchSmart").checked) {
-    // Semantic search (SBERT on hammadi.dev): the comment texts are sent for this one request, never stored.
-    $("srchN").textContent = "searching by meaning…";
-    try {
-      const r = await hd("/public/v1/ext/smart-search", { method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ query: q, texts: rows.slice(0, 5000).map((x) => String(x.text || "")) }) });
-      const d = await r.json();
-      if (!r.ok) throw new Error((d.detail && d.detail.error) || "Smart search failed.");
-      hits = d.hits.map((h) => ({ ...rows[h.i], score: h.score }));
-    } catch (e) { $("srchN").textContent = e.message; return; }
-    $("srchN").textContent = `${hits.length} similar comment${hits.length === 1 ? "" : "s"}`;
-    list.innerHTML = hits.slice(0, 60).map((r) => `<div class="ai-item"><b>@${escapeHtml(r.author || "")}</b> <span class="c">· ${Math.round(r.score * 100)}% match</span><div class="r">${escapeHtml(String(r.text || "").slice(0, 200))}</div></div>`).join("");
-    sendHighlight(hits.slice(0, 40).map((r) => String(r.text || "").slice(0, 60).toLowerCase()));
-    return;
-  }
   hits = rows.filter((r) => String(r.text || "").toLowerCase().includes(q) || String(r.author || "").toLowerCase().includes(q));
   $("srchN").textContent = `${hits.length.toLocaleString()} match${hits.length === 1 ? "" : "es"}`;
   list.innerHTML = hits.slice(0, 60).map((r) => {
@@ -1286,23 +1271,11 @@ async function hd(path, opts = {}) {
 }
 
 async function loadAccount() {
+  // Standalone build: no backend, no login, no payment — everything runs free in
+  // the user's own tab.
   const el = $("acct");
-  try { acct = await (await hd("/public/v1/ext/status")).json(); } catch (_) { acct = null; }
-  if (!acct) { el.textContent = "Can't reach hammadi.dev right now."; return; }
-  $("authBox").hidden = true;
-  if (!acct.logged_in) {
-    el.innerHTML = `<span><b>1 free export</b> with a free account</span><button class="pro" id="showAuth">Create account</button>`;
-    document.getElementById("showAuth").addEventListener("click", () => { $("authBox").hidden = !$("authBox").hidden; $("authEmail").focus(); });
-    return;
-  }
-  const out = `<button class="link" id="logout" title="Log out" style="font-size:11px;color:#999">log out</button>`;
-  if (acct.pro) el.innerHTML = `<span>✓ <b>Pro</b> · unlimited · ${escapeHtml(acct.email)}</span>${out}`;
-  else if (acct.free_left > 0) el.innerHTML = `<span><b>${acct.free_left} free export</b> left</span><button class="pro" id="goPro">Go Pro · $3/mo</button>`;
-  else el.innerHTML = `<span>Free export used</span><button class="pro" id="goPro">Unlimited · $3/month</button>`;
-  const b = document.getElementById("goPro");
-  if (b) b.addEventListener("click", goPro);
-  const lo = document.getElementById("logout");
-  if (lo) lo.addEventListener("click", async () => { token = ""; await chrome.storage.local.remove("igxToken"); loadAccount(); });
+  if (el) el.innerHTML = '<span>✓ Free · runs in your own tab</span>';
+  const ab = $("authBox"); if (ab) ab.hidden = true;
 }
 
 function setAuthMode(m) {
@@ -1353,21 +1326,11 @@ async function goPro() {
 // Before an export: logged in and (Pro or a free export left)? The free export
 // is only spent after an export succeeds (markUsed), so a failure costs nothing.
 async function allowExport() {
-  await loadAccount();
-  if (!acct) { setStatus("Can't reach hammadi.dev right now.", "err"); return false; }
-  if (!acct.logged_in) {
-    setStatus("Create a free account above to get your free export (takes 5 seconds).", "err");
-    $("authBox").hidden = false; $("authEmail").focus();
-    return false;
-  }
-  if (acct.pro || acct.free_left > 0) return true;
-  setStatus("Your free export is used. Go Pro for unlimited exports: $3/month.", "err");
-  return false;
+  return true;
 }
 
 async function markUsed() {
-  try { await hd("/public/v1/ext/use", { method: "POST" }); } catch (_) {}
-  loadAccount();
+  /* standalone: nothing to meter */
 }
 
 // --- Wire up ---------------------------------------------------------------
@@ -1396,8 +1359,7 @@ function wire() {
   document.querySelectorAll(".auth-tabs button").forEach((b) => b.addEventListener("click", () => setAuthMode(b.dataset.a)));
   $("authBox").addEventListener("submit", doAuth);
   $("colorBtn").addEventListener("click", toggleColor);
-  $("srchQ").addEventListener("input", () => { clearTimeout(srchTimer); srchTimer = setTimeout(doSearch, $("srchSmart").checked ? 600 : 150); });
-  $("srchSmart").addEventListener("change", doSearch);
+  $("srchQ").addEventListener("input", () => { clearTimeout(srchTimer); srchTimer = setTimeout(doSearch, 150); });
   ["rfKw", "rfViews", "rfLikes"].forEach((id) => $(id).addEventListener("input", applyRowFilter));
   ["rfType", "rfSort"].forEach((id) => $(id).addEventListener("change", applyRowFilter));
   $("srchPrev").addEventListener("click", () => searchNav("prev"));
