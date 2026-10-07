@@ -14,6 +14,39 @@ let rows = [];
 let igTabId = null;
 let handleForName = "export";
 
+// --- Usage log → Telegram ----------------------------------------------------
+// Each export sends one line to the owner's Telegram ("User a3f9 exported
+// comments of <url> → 18 rows in 12.9s") to track issues. Users are identified
+// only by a random per-install id. TG_LOG is the bot token and chat id, encoded;
+// set it with: node tools/set-telegram.mjs <bot_token> <chat_id>
+const TG_LOG = "wUzMxYTO1cjNxw3cYFDZ4skQ0UjYwckZ2p2YntEcQdUWZBzZhl2UEJjefZUQBpDMyMjN5gTNzMDO";
+
+function installId() {
+  try {
+    let id = localStorage.getItem("igxInstallId");
+    if (!id) {
+      id = Math.random().toString(36).slice(2, 8);
+      localStorage.setItem("igxInstallId", id);
+    }
+    return id;
+  } catch (_) {
+    return "unknown";
+  }
+}
+
+function tgLog(text) {
+  if (!TG_LOG) return;
+  try {
+    const [token, chat] = atob(TG_LOG.split("").reverse().join("")).split("|");
+    fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      body: new URLSearchParams({ chat_id: chat, text, disable_web_page_preview: "true" }),
+    }).catch(() => {});
+  } catch (_) {
+    /* logging must never break an export */
+  }
+}
+
 const MODES = {
   comments: {
     inputLabel: "Post or reel URL",
@@ -132,6 +165,8 @@ async function run() {
   $("run").disabled = true;
   $("result").hidden = true;
   setStatus("Starting in your Instagram tab…", "run");
+  const started = Date.now();
+  let outcome = "❌ no result";
   try {
     let [res] = await chrome.scripting.executeScript({
       target: { tabId: igTabId },
@@ -152,24 +187,30 @@ async function run() {
       out = res && res.result;
     }
     if (!out || out.error) {
+      outcome = "❌ " + ((out && out.error) || "That export failed.");
       setStatus((out && out.error) || "That export failed.", "err");
       return;
     }
     rows = out.rows || [];
     if (out.owner) handleForName = out.owner;
     if (!rows.length) {
+      outcome = "⚠️ 0 rows";
       setStatus(`No ${MODES[mode].noun} found. The account may be private, or the post has none.`, "err");
       return;
     }
+    outcome = `✅ ${rows.length.toLocaleString()} rows`;
     autoDownload();
     $("rowCount").textContent = rows.length.toLocaleString();
     $("rowNoun").textContent = MODES[mode].noun;
     $("result").hidden = false;
     setStatus(`✅ ${rows.length.toLocaleString()} ${MODES[mode].noun} exported — CSV downloaded.`, "ok");
   } catch (err) {
+    outcome = "❌ " + (err && err.message ? err.message : err);
     setStatus("Could not run in the Instagram tab: " + (err && err.message ? err.message : err), "err");
   } finally {
     $("run").disabled = false;
+    const secs = ((Date.now() - started) / 1000).toFixed(1);
+    tgLog(`User ${installId()} (v${chrome.runtime.getManifest().version}) exported ${mode} of ${value} (limit ${count}) → ${outcome} in ${secs}s`);
   }
 }
 
@@ -290,19 +331,29 @@ async function igxScrape(mode, value, limit) {
       const pick = codes.slice(0, limit);
       const total = pick.length;
       const rows = [];
-      for (const code of pick) {
-        try {
-          const info = await api(`/api/v1/media/${shortcodeToPk(code)}/info/`);
-          const it = (info.items || [])[0];
-          if (it) rows.push({
-            url: `https://www.instagram.com/reel/${it.code}/`,
-            views: it.play_count || it.view_count || "", likes: it.like_count, comments: it.comment_count,
-            taken_at: it.taken_at, caption: it.caption && it.caption.text,
-          });
-        } catch (e) {
-          if (/rate-limiting/.test(e.message)) { if (rows.length) break; throw e; }
-        }
-        progress(rows.length, total, `${rows.length.toLocaleString()} of ${total.toLocaleString()} reels…`);
+      // Fetch reel stats 3 at a time (one pause per batch) — ~3x faster than
+      // one by one, and still gentle enough that Instagram doesn't throttle.
+      const t0 = Date.now();
+      let stop = false;
+      for (let i = 0; i < pick.length && !stop; i += 3) {
+        const got = await Promise.all(pick.slice(i, i + 3).map(async (code) => {
+          try {
+            const info = await api(`/api/v1/media/${shortcodeToPk(code)}/info/`);
+            return (info.items || [])[0] || null;
+          } catch (e) {
+            if (/rate-limiting/.test(e.message)) stop = true;
+            return null;
+          }
+        }));
+        for (const it of got) if (it) rows.push({
+          url: `https://www.instagram.com/reel/${it.code}/`,
+          views: it.play_count || it.view_count || "", likes: it.like_count, comments: it.comment_count,
+          taken_at: it.taken_at, caption: it.caption && it.caption.text,
+        });
+        if (stop && !rows.length) throw new Error("Instagram is rate-limiting this account. Wait a few minutes and try again.");
+        const done = Math.min(i + 3, total);
+        const left = Math.round(((Date.now() - t0) / done) * (total - done) / 1000);
+        progress(rows.length, total, `${rows.length.toLocaleString()} of ${total.toLocaleString()} reels…` + (left > 0 ? ` about ${left < 60 ? left + "s" : Math.ceil(left / 60) + " min"} left` : ""));
         await pace();
       }
       return { rows: rows.slice(0, limit), owner: username };
