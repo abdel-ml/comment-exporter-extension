@@ -218,11 +218,19 @@ async function igxScrape(mode, value, limit) {
       const item = (info.items || [])[0] || {};
       const total = Math.min(limit, item.comment_count || limit);
       const rows = [];
-      let minId = null;
+      // Instagram's comment cursor eventually cycles back to pages it already
+      // served, so dedupe by comment id and stop once a page brings nothing new.
+      const seenIds = new Set();
+      const seenCursors = new Set();
+      let minId = null, stale = 0;
       do {
+        let fresh = 0;
         const q = `can_support_threading=true&permalink_enabled=false` + (minId ? `&min_id=${encodeURIComponent(minId)}` : "");
         const page = await api(`/api/v1/media/${pk}/comments/?${q}`);
         for (const c of page.comments || []) {
+          if (seenIds.has(String(c.pk))) continue;
+          seenIds.add(String(c.pk));
+          fresh++;
           rows.push({ author: c.user && c.user.username, text: c.text, likes: c.comment_like_count, replies: c.child_comment_count || 0,
                       is_reply: false, created_at: c.created_at });
           if (c.child_comment_count && rows.length < limit) {
@@ -230,6 +238,8 @@ async function igxScrape(mode, value, limit) {
             do {
               const rp = await api(`/api/v1/media/${pk}/comments/${c.pk}/child_comments/` + (maxId ? `?max_id=${encodeURIComponent(maxId)}` : ""));
               for (const r of rp.child_comments || []) {
+                if (seenIds.has(String(r.pk))) continue;
+                seenIds.add(String(r.pk));
                 rows.push({ author: r.user && r.user.username, text: r.text, likes: r.comment_like_count, replies: 0,
                             is_reply: true, created_at: r.created_at });
               }
@@ -239,8 +249,14 @@ async function igxScrape(mode, value, limit) {
           }
           if (rows.length >= limit) break;
         }
-        progress(rows.length, total, `${rows.length.toLocaleString()} of ~${total.toLocaleString()} comments…`);
+        const shown = Math.max(total, rows.length);
+        progress(rows.length, shown, `${rows.length.toLocaleString()} of ~${shown.toLocaleString()} comments…`);
+        stale = fresh ? 0 : stale + 1;
         minId = page.has_more_headload_comments || page.next_min_id ? page.next_min_id : null;
+        // Stop after two pages in a row with nothing new, a repeated cursor, or
+        // once we hold as many comments as the post says it has.
+        if (stale >= 2 || (minId && seenCursors.has(minId)) || (item.comment_count && seenIds.size >= item.comment_count)) minId = null;
+        if (minId) seenCursors.add(minId);
         if (minId) await pace();
       } while (minId && rows.length < limit);
       return { rows: rows.slice(0, limit), owner: item.user && item.user.username };
